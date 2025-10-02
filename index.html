@@ -12,7 +12,8 @@
   <!-- Babel pro JSX v prohlížeči (pouze pro demo / GH Pages) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Recharts UMD build -->
-  <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+  <!-- Recharts UMD build (pinned version) -->
+  <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"></script>
   <style>
     /* Jemné doladění vzhledu */
     html, body { height: 100%; background: #F9FAFB; }
@@ -23,6 +24,24 @@
 
   <!-- APLIKACE -->
   <script type="text/babel">
+    // ZAJIŠTĚNÍ NAČTENÍ KNIHOVEN PŘED STARTEM APLIKACE
+    window.addEventListener('load', () => {
+      if (!window.Recharts) {
+        const rootEl = document.getElementById('root');
+        rootEl.innerHTML = '<div class="max-w-xl mx-auto mt-10 p-4 bg-red-50 border border-red-200 rounded">'+
+          '<h2 class="text-red-700 font-bold mb-2">Chyba: knihovna Recharts se nenačetla</h2>'+
+          '<p class="text-sm text-red-700">Zkontroluj internetové připojení nebo načtení CDN skriptů. Pokud běžíš lokálně přes file://, mělo by to i tak fungovat. Zkus stránku obnovit.</p>'+
+          '</div>';
+        return;
+      }
+
+      const { useState, useMemo, useRef, useEffect, useCallback, memo } = React;
+      const {
+        ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
+        XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList
+      } = window.Recharts;
+
+      // ---- původní kód pokračuje níže ----
     const { useState, useMemo, useRef, useEffect, useCallback, memo } = React;
     const {
       ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -506,7 +525,8 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+      root.render(<App />);
+    }); // end window.load listener
   </script>
 </body>
 </html>
