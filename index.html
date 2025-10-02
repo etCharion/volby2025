@@ -1,0 +1,880 @@
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import {
+  BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList
+} from 'recharts';
+import { ChevronDown, ChevronUp } from 'lucide-react'; // Ikony pro sbalení/rozbalení
+
+// --- 1. DATA A KONSTANTY ---
+
+// Data extrahovaná z původní tabulky
+const rawData = [
+    { party: "Spolu", students: 26, teachers: 4 },
+    { party: "SPD", students: 1, teachers: 0 },
+    { party: "Motoristé", students: 5, teachers: 1 },
+    { party: "MZH", students: 1, teachers: 0 },
+    { party: "Generace", students: 1, teachers: 0 },
+    { party: "Levice", students: 1, teachers: 0 },
+    { party: "SMS", students: 1, teachers: 0 },
+    { party: "Přísaha", students: 1, teachers: 0 },
+    { party: "Voluntia", students: 3, teachers: 0 },
+    { party: "Ano", students: 2, teachers: 0 },
+    { party: "Rebelové", students: 3, teachers: 1 },
+    { party: "Koruna", students: 1, teachers: 1 },
+    { party: "STAN", students: 35, teachers: 4 },
+    { party: "Piráti", students: 24, teachers: 1 },
+];
+
+// Celkové počty hlasů a oprávněných voličů (z tabulky)
+const TOTAL_STUDENT_VOTES = 105;
+const TOTAL_TEACHER_VOTES = 11;
+const TOTAL_ELIGIBLE_STUDENTS = 182;
+const TOTAL_ELIGIBLE_TEACHERS = 11; 
+
+// Konstanty pro simulaci
+const TOTAL_MANDATES = 200; 
+const VOTE_MULTIPLIER = 1000; 
+const THRESHOLD_PERCENT = 5; // 5% volební klauzule
+
+// Barvy stran (upraveny pro lepší viditelnost na světlém pozadí)
+const PARTY_COLORS = {
+    "Spolu": "#4F46E5",    // Indigo
+    "SPD": "#DC2626",      // Red
+    "Motoristé": "#F59E0B",// Amber
+    "MZH": "#9CA3AF",      // Gray
+    "Generace": "#C026D3", // Fuchsia
+    "Levice": "#0D9488",   // Teal
+    "SMS": "#2563EB",      // Blue
+    "Přísaha": "#7C3AED",  // Violet
+    "Voluntia": "#EC4899", // Pink
+    "Ano": "#FCD34D",      // Yellow
+    "Rebelové": "#4B5563", // Dark Gray
+    "Koruna": "#9CA3AF",   // Gray (stejná jako MZH pro neutrální)
+    "STAN": "#10B981",     // Emerald
+    "Piráti": "#EA580C",   // Orange
+};
+
+// --- 2. LOGIKA D'HONDTovy METODY ---
+
+/**
+ * Přepočítá hlasy na mandáty D'Hondtovou metodou.
+ */
+const calculateDHondt = (votes, totalMandates) => {
+    const qualifiedParties = votes.filter(p => p.percentage >= THRESHOLD_PERCENT);
+
+    // Pokud nikdo neprošel, vrátíme 0 mandátů
+    if (qualifiedParties.length === 0) {
+        return votes.map(p => ({ 
+            party: p.party,
+            votes: p.votes / VOTE_MULTIPLIER, 
+            percentage: p.percentage,
+            mandates: 0,
+            color: PARTY_COLORS[p.party] || '#000000',
+            isQualified: false,
+        }));
+    }
+
+    qualifiedParties.forEach(p => p.mandates = 0);
+    
+    // Použijeme zástupné kvocienty
+    const divisors = qualifiedParties.map(p => ({ party: p.party, votes: p.votes, divisor: p.votes }));
+    
+    for (let i = 0; i < totalMandates; i++) {
+        // Vybereme vítěze s nejvyšším kvocientem
+        divisors.sort((a, b) => b.divisor - a.divisor);
+        const winner = divisors[0];
+        
+        if (!winner) break;
+
+        const originalParty = qualifiedParties.find(p => p.party === winner.party);
+        if (originalParty) {
+            originalParty.mandates++;
+        }
+
+        // Přepočítáme kvocient: Hlasy / (Mandáty + 1)
+        winner.divisor = winner.votes / (originalParty.mandates + 1);
+    }
+
+    // Sloučení výsledků (včetně těch, které neprošly klauzulí)
+    const results = votes.map(p => {
+        const qualified = qualifiedParties.find(q => q.party === p.party);
+        return {
+            party: p.party,
+            votes: p.votes / VOTE_MULTIPLIER, // Vrácení reálných hlasů
+            percentage: p.percentage,
+            mandates: qualified ? qualified.mandates : 0,
+            color: PARTY_COLORS[p.party] || '#000000',
+            isQualified: !!qualified,
+        };
+    });
+
+    // POZN: Zde data NEŘADÍME, aby mohla být použita pro dynamické řazení v grafech/tabulkách
+    return results;
+};
+
+/**
+ * Spočíta celý scénář (Studentský nebo Kombinovaný).
+ */
+const calculateScenario = (data, totalValidVotes, totalEligibleVoters) => {
+    // OPRAVA CHYBY: Opravena syntaktická chyba v reduce
+    const totalVotes = data.reduce((sum, p) => sum + p.votes, 0);
+
+    const resultsWithPercent = data.map(p => ({
+        ...p,
+        percentage: (p.votes / totalVotes) * 100,
+    }));
+
+    // Pro D'Hondta hlasy násobíme, aby byla simulace 200 mandátů realistická
+    const dataForDHondt = resultsWithPercent.map(p => ({
+        ...p,
+        votes: p.votes * VOTE_MULTIPLIER 
+    }));
+
+    const results = calculateDHondt(dataForDHondt, TOTAL_MANDATES);
+    
+    const turnout = (totalValidVotes / totalEligibleVoters) * 100;
+
+    return {
+        totalVotes: totalValidVotes,
+        turnout: turnout,
+        results: results
+    };
+};
+
+// --- POMOCNÁ FUNKCE PRO KROKOVOU SIMULACI D'HONDTovy METODY ---
+
+/**
+ * Provede detailní D'Hondtovu simulaci a zaznamená každý krok.
+ * Používá data ze Scénáře B (kombinované hlasy).
+ */
+const getDHondtSteps = (data, totalMandates, multiplier, threshold) => {
+    // 1. Příprava dat (sloučení studentských a učitelských hlasů)
+    const combinedData = data.map(p => ({ party: p.party, votes: p.students + p.teachers }));
+    const totalVotes = combinedData.reduce((sum, p) => sum + p.votes, 0);
+
+    const resultsWithPercent = combinedData.map(p => ({
+        ...p,
+        percentage: (p.votes / totalVotes) * 100,
+        votes: p.votes * multiplier, // Hlasy násobené pro simulaci
+    }));
+
+    // 2. Volební klauzule (5%)
+    const qualifiedParties = resultsWithPercent.filter(p => p.percentage >= threshold);
+    
+    if (qualifiedParties.length === 0) return [];
+    
+    qualifiedParties.forEach(p => p.mandates = 0);
+    
+    // Inicializace kvocientů (hlasy / 1)
+    const divisors = qualifiedParties.map(p => ({ party: p.party, votes: p.votes, divisor: p.votes }));
+    const steps = [];
+    
+    // 3. Iterativní rozdělování mandátů
+    for (let i = 0; i < totalMandates; i++) {
+        // A. Uložit aktuální stav PŘED udělením mandátu
+        const currentDivisors = divisors.map(d => {
+            const partyResult = qualifiedParties.find(p => p.party === d.party);
+            return {
+                party: d.party,
+                votes: d.votes,
+                divisor: d.divisor, // Kvócients, se kterým se soutěží
+                mandates: partyResult ? partyResult.mandates : 0,
+            };
+        });
+        
+        // B. Vybrat vítěze s nejvyšším kvocientem
+        divisors.sort((a, b) => b.divisor - a.divisor);
+        const winner = divisors[0];
+        
+        if (!winner) break;
+
+        const originalParty = qualifiedParties.find(p => p.party === winner.party);
+        
+        // C. Uložit krok
+        steps.push({
+            mandateNo: i + 1,
+            winnerParty: winner.party,
+            // Uložíme hlubokou kopii stavu PŘED udělením mandátu (kromě vítěze, který je zvýrazněn)
+            stateBefore: currentDivisors, 
+        });
+
+        // D. Udělit mandát a přepočítat kvocient
+        if (originalParty) {
+            originalParty.mandates++;
+        }
+        winner.divisor = winner.votes / (originalParty.mandates + 1);
+    }
+
+    return steps;
+};
+
+
+// --- 3. KOMPONENTY VIZUALIZACE ---
+
+/**
+ * Komponenta pro zobrazení mapy křesel (Seat Map) pomocí Canvasu.
+ */
+const SeatMapCanvas = React.memo(({ results }) => {
+    const canvasRef = useRef(null);
+
+    // callback pro kreslení na Canvas
+    const drawSeatMap = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        
+        // Nastavení rozlišení Canvasu pro lepší zobrazení na retina displejích
+        const scale = window.devicePixelRatio || 1;
+        const displayWidth = canvas.clientWidth;
+        const displayHeight = canvas.clientHeight;
+
+        canvas.width = displayWidth * scale;
+        canvas.height = displayHeight * scale;
+        ctx.scale(scale, scale);
+        
+        const width = displayWidth;
+        const height = displayHeight;
+        ctx.clearRect(0, 0, width, height); 
+        
+        // Nastavení pro mřížku 20 x 10 = 200 mandátů
+        const cols = 20;
+        const rows = 10;
+        const padding = 10;
+        const cellMargin = 3;
+        
+        const cellWidth = (width - padding * 2 - cellMargin * (cols - 1)) / cols;
+        const cellHeight = (height - padding * 2 - cellMargin * (rows - 1)) / rows;
+        
+        // Příprava dat (sekvenční seznam 200 mandátů), seřazený podle počtu mandátů
+        let seatAssignments = [];
+        // Nejdřív seřadíme strany podle mandátů
+        const sortedResults = [...results].sort((a, b) => b.mandates - a.mandates);
+
+        sortedResults.filter(p => p.mandates > 0).forEach(p => {
+            for(let i = 0; i < p.mandates; i++) {
+                seatAssignments.push(p.party);
+            }
+        });
+        seatAssignments = seatAssignments.slice(0, TOTAL_MANDATES); 
+
+        // Vykreslení mřížky (křesla)
+        for (let i = 0; i < TOTAL_MANDATES; i++) {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+
+            const x = padding + col * (cellWidth + cellMargin);
+            const y = padding + row * (cellHeight + cellMargin);
+            
+            const party = seatAssignments[i];
+            
+            ctx.beginPath();
+            ctx.arc(x + cellWidth / 2, y + cellHeight / 2, Math.min(cellWidth, cellHeight) * 0.45, 0, 2 * Math.PI);
+
+            const color = party ? PARTY_COLORS[party] : '#ccc';
+            ctx.fillStyle = color; 
+            ctx.fill();
+            
+            // Okraj pro oddělení (světlá verze)
+            ctx.strokeStyle = '#E5E7EB'; 
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }, [results]);
+
+    // Spuštění kreslení po namountování a při změně dat
+    useEffect(() => {
+        // Oprava: Zajistit, aby se canvas vykreslil po plném vykreslení DOM
+        const handler = () => {
+            drawSeatMap();
+        };
+        window.addEventListener('load', handler);
+        window.addEventListener('resize', handler);
+        handler(); // Počáteční vykreslení
+        
+        return () => {
+            window.removeEventListener('load', handler);
+            window.removeEventListener('resize', handler);
+        };
+    }, [drawSeatMap]);
+
+    return (
+        <canvas 
+            ref={canvasRef} 
+            className="w-full h-auto max-w-full rounded-lg bg-gray-100 border border-gray-300"
+            style={{ width: '100%', height: 'auto', aspectRatio: '2 / 1' }} 
+        />
+    );
+});
+
+
+/**
+ * Generická komponenta pro vykreslení Bar nebo Pie grafu pomocí Recharts.
+ */
+const ChartRenderer = ({ type, data, dataKey, isMandate }) => {
+    
+    // Zde provádíme ŘAZENÍ: seřadit data sestupně podle hodnoty dataKey (procenta/mandáty)
+    const sortedData = useMemo(() => {
+        if (!data) return [];
+        return [...data].sort((a, b) => b[dataKey] - a[dataKey]);
+    }, [data, dataKey]);
+
+    const unit = isMandate ? '' : '%';
+    const labelFormatter = (value) => isMandate ? value.toFixed(0) : value.toFixed(1) + '%';
+    
+    // Pro Koláčový graf potřebujeme data v jiném formátu: [{ name: 'Strana', value: X }]
+    const pieData = useMemo(() => {
+        if (!sortedData || type !== 'pie') return [];
+        // Zde filtrujeme data, aby se v koláčovém grafu a legendě zobrazily jen strany s hodnotou > 0
+        return sortedData.filter(p => p[dataKey] > 0).map(p => ({
+            name: p.party,
+            value: p[dataKey],
+            color: p.color
+        }));
+    }, [sortedData, dataKey, type]);
+
+
+    // BAR CHART
+    if (type === 'bar') {
+        const chartData = sortedData.map(p => ({
+            name: p.party,
+            value: p[dataKey],
+            color: p.color,
+            isQualified: p.isQualified
+        }));
+
+        return (
+            <ResponsiveContainer width="100%" height={400}>
+                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#D1D5DB" /> {/* Světlejší mřížka */}
+                    <XAxis 
+                        dataKey="name" 
+                        stroke="#4B5563" // Tmavší text
+                        interval={0} 
+                        angle={-45} 
+                        textAnchor="end" 
+                        height={80} 
+                    />
+                    <YAxis 
+                        stroke="#4B5563" // Tmavší text
+                        tickFormatter={labelFormatter} 
+                    />
+                    <Tooltip 
+                        contentStyle={{ backgroundColor: '#fff', border: '1px solid #D1D5DB', borderRadius: '8px' }} // Světlý tooltip
+                        formatter={(value, name, props) => [labelFormatter(value), props.payload.name]}
+                        labelFormatter={(label) => label}
+                    />
+                    <Bar dataKey="value" name={isMandate ? "Mandáty" : "Procenta hlasů"}>
+                        {chartData.map((entry, index) => (
+                            <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.color} 
+                                opacity={entry.isQualified ? 1 : 0.4} // Oslabení stran pod 5%
+                            />
+                        ))}
+                        <LabelList 
+                            dataKey="value" 
+                            position="top" 
+                            formatter={(value) => isMandate ? value.toFixed(0) : value.toFixed(1)} 
+                            fill="#4B5563" // Tmavší text
+                            fontSize={12}
+                        />
+                    </Bar>
+                </BarChart>
+            </ResponsiveContainer>
+        );
+    }
+
+    // PIE CHART
+    if (type === 'pie') {
+        return (
+            <div className="flex justify-center items-center h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Pie
+                            data={pieData}
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={150}
+                            fill="#8884d8"
+                            dataKey="value"
+                            nameKey="name"
+                            labelLine={false}
+                            label={false} 
+                        >
+                            {pieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                        </Pie>
+                        <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #D1D5DB', borderRadius: '8px', color: '#374151' }}
+                            formatter={(value, name) => [`${value.toFixed(2)}${unit}`, name]}
+                        />
+                        {/* Legendu přesuneme doprava, aby byla přehledná */}
+                        <Legend 
+                            layout="vertical" 
+                            align="right" 
+                            verticalAlign="middle" 
+                            wrapperStyle={{ paddingLeft: '20px', color: '#4B5563' }} // Tmavší text
+                            // Formátování legendy, aby se zobrazovala hodnota
+                            formatter={(value, entry) => {
+                                const dataEntry = pieData.find(d => d.name === value);
+                                const displayValue = dataEntry 
+                                    ? isMandate ? dataEntry.value.toFixed(0) : dataEntry.value.toFixed(2) + '%'
+                                    : '';
+                                return <span style={{ color: entry.color || '#374151', fontWeight: 'bold' }}>{value} ({displayValue})</span>;
+                            }}
+                        />
+                    </PieChart>
+                </ResponsiveContainer>
+            </div>
+        );
+    }
+
+    return null;
+};
+
+
+/**
+ * Komponenta pro vykreslení tabulky s kroky simulace D'Hondtovy metody.
+ */
+const DHondtStepTable = React.memo(({ steps }) => {
+    if (!steps || steps.length === 0) return <p className="text-red-500">Žádné strany neprošly klauzulí 5%.</p>;
+
+    // Zobrazíme prvních 5 a posledních 5 kroků
+    const visibleSteps = steps.slice(0, 5);
+    const lastSteps = steps.length > 10 ? steps.slice(-5) : [];
+    
+    // Získání názvů stran (z prvního kroku) a jejich seřazení pro stabilní sloupce
+    const partyNames = steps[0].stateBefore.map(d => d.party).sort();
+
+    const renderStep = (step, isLast) => {
+        // Seřadíme data v kroku podle názvu strany
+        const sortedState = [...step.stateBefore].sort((a, b) => a.party.localeCompare(b.party));
+
+        return (
+            <tr key={step.mandateNo} className={`text-sm ${isLast ? 'bg-yellow-50' : 'bg-white'} hover:bg-gray-100 transition duration-150`}>
+                <td className="px-3 py-2 text-center font-bold border-r border-gray-200 text-lg bg-indigo-100/70 text-indigo-800 sticky left-0">
+                    {step.mandateNo}.
+                </td>
+                
+                {sortedState.map((partyData) => {
+                    const isWinner = partyData.party === step.winnerParty;
+                    
+                    return (
+                        <td key={partyData.party} className={`px-4 py-2 text-center text-gray-700 whitespace-nowrap border-r border-gray-200
+                            ${isWinner 
+                                ? 'bg-emerald-100 font-extrabold text-emerald-800 border-l-4 border-emerald-500' 
+                                : ''
+                            }`}
+                        >
+                            {/* Kvocient se kterým soutěžila (před udělením mandátu) */}
+                            <span className={`block text-lg ${isWinner ? 'text-xl' : ''}`}>
+                                {partyData.divisor.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, " ")}
+                            </span>
+                            {/* Stav mandátů před udělením mandátu (pro srozumitelnost) */}
+                            <span className="block text-xs text-gray-500">
+                                Mandáty: {partyData.mandates} / Dělitel: {partyData.mandates + 1}
+                            </span>
+                        </td>
+                    );
+                })}
+            </tr>
+        );
+    };
+
+    return (
+        <div className="overflow-x-auto border border-gray-300 rounded-lg shadow-inner">
+            <p className="p-3 font-semibold text-gray-700 bg-gray-50 border-b border-gray-200">
+                Příklad: Rozdělení mandátů dle D'Hondta (Scénář B: Žáci + Učitelé). Zvýrazněný sloupec (kvocient) získá mandát.
+            </p>
+            <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-200">
+                    <tr>
+                        <th className="px-3 py-2 text-center text-xs font-bold text-gray-700 uppercase tracking-wider sticky left-0 z-10 bg-indigo-200/90 shadow-sm">
+                            Mandát #
+                        </th>
+                        {partyNames.map(party => (
+                            <th key={party} className="px-4 py-2 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                {party}
+                                <span className="block h-2 w-full rounded-full mt-1" style={{ backgroundColor: PARTY_COLORS[party] }}></span>
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                    {/* Prvních 5 kroků */}
+                    {visibleSteps.map(step => renderStep(step, false))}
+
+                    {/* Oddělovač */}
+                    {lastSteps.length > 0 && (
+                         <tr className="bg-gray-300/80">
+                            <td colSpan={partyNames.length + 1} className="text-center py-2 text-md font-bold text-gray-700">
+                                . . . {steps.length - 10} MANDÁTŮ VYNECHÁNO . . .
+                            </td>
+                        </tr>
+                    )}
+                   
+                    {/* Posledních 5 kroků */}
+                    {lastSteps.map(step => renderStep(step, true))}
+                </tbody>
+            </table>
+        </div>
+    );
+});
+
+
+// --- 4. HLAVNÍ KOMPONENTA A LOGIKA STAVU ---
+
+const App = () => {
+    const [s1View, setS1View] = useState({ percent: 'bar', mandate: 'bar' });
+    const [s2View, setS2View] = useState({ percent: 'bar', mandate: 'bar' });
+    const [isModalOpen, setIsModalOpen] = useState(false);
+
+    // --- Kalkulace (pouze jednou po mountu) ---
+    const studentVotes = useMemo(() => rawData.map(p => ({ party: p.party, votes: p.students })), []);
+    const combinedVotes = useMemo(() => rawData.map(p => ({ party: p.party, votes: p.students + p.teachers })), []);
+
+    const s1 = useMemo(() => calculateScenario(studentVotes, TOTAL_STUDENT_VOTES, TOTAL_ELIGIBLE_STUDENTS), [studentVotes]);
+    const s2 = useMemo(() => calculateScenario(combinedVotes, TOTAL_STUDENT_VOTES + TOTAL_TEACHER_VOTES, TOTAL_ELIGIBLE_STUDENTS + TOTAL_ELIGIBLE_TEACHERS), [combinedVotes]);
+
+    // KROKOVÁ SIMULACE PRO MODAL (Použijeme Scénář B)
+    const dhondtSteps = useMemo(() => 
+        getDHondtSteps(rawData, TOTAL_MANDATES, VOTE_MULTIPLIER, THRESHOLD_PERCENT)
+    , [rawData]);
+
+
+    /**
+     * Zpracuje kliknutí na tlačítko a přepne stav zobrazení.
+     */
+    const handleToggle = (scenario, dataType, viewType) => {
+        if (scenario === 's1') {
+            setS1View(prev => ({ ...prev, [dataType]: viewType }));
+        } else {
+            setS2View(prev => ({ ...prev, [dataType]: viewType }));
+        }
+    };
+    
+    // --- POMOCNÉ KOMPONENTY PRO VYKRESLENÍ ---
+
+    const TurnoutDisplay = ({ label, totalVotes, eligibleVoters, color }) => {
+        const turnout = ((totalVotes / eligibleVoters) * 100).toFixed(2);
+        return (
+            <div className={`p-5 bg-gray-100 rounded-xl shadow-lg border-l-4 border-${color}-500 border-opacity-70 text-gray-800`}>
+                <p className={`text-xl font-bold text-${color}-600`}>{label}</p>
+                <p className="text-4xl font-extrabold text-gray-900">{turnout}%</p>
+                <p className="text-sm text-gray-600">{totalVotes} z {eligibleVoters} oprávněných voličů</p>
+            </div>
+        );
+    };
+
+    const VizToggleButtons = ({ scenario, dataType, currentView, accentColor }) => {
+        // Používáme pevné barvy pro UI prvky, abychom se vyhnuli problémům s Tailwind CSS JIT
+        const accentClass = accentColor === 'Spolu' ? 'indigo' : 'emerald'; 
+
+        const buttons = [
+            { type: 'bar', label: 'Sloupce' },
+            { type: 'pie', label: 'Koláč' },
+        ];
+        // Pouze pro mandáty přidáme mapu křesel
+        if (dataType === 'mandate') {
+            buttons.push({ type: 'seatmap', label: 'Křesla' }); 
+        }
+
+        return (
+            <div className="flex items-center space-x-3 flex-wrap gap-y-2">
+                <span className={`font-extrabold text-${accentClass}-600 whitespace-nowrap`}>
+                    {dataType === 'percent' ? 'Hlasy:' : 'Mandáty:'} 
+                </span>
+                <div className="flex space-x-2 p-1 bg-gray-200 rounded-xl shadow-inner">
+                    {buttons.map(btn => (
+                        <button
+                            key={btn.type}
+                            onClick={() => handleToggle(scenario, dataType, btn.type)}
+                            className={`px-4 py-2 text-sm font-bold rounded-lg transition duration-200 ease-in-out cursor-pointer text-center min-w-[80px]
+                                ${currentView === btn.type
+                                    ? `bg-indigo-600 text-white shadow-md shadow-indigo-300 ring-2 ring-indigo-400 transform scale-105`
+                                    : 'bg-white text-gray-700 hover:bg-gray-100'
+                                }
+                            `}
+                        >
+                            {btn.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    // Nová komponenta pro sbalitelnou tabulku výsledků
+    const ResultsTable = ({ results, accentColor }) => {
+        const [isCollapsed, setIsCollapsed] = useState(true);
+        
+        const sortedResults = useMemo(() => {
+            return [...results].sort((a, b) => {
+                if (b.mandates !== a.mandates) {
+                    return b.mandates - a.mandates;
+                }
+                return b.percentage - a.percentage;
+            });
+        }, [results]);
+
+        const totalMandatesAssigned = results.reduce((sum, p) => sum + p.mandates, 0);
+        // Používáme party barvu pro button, ale fall back na indigo
+        const buttonColor = PARTY_COLORS[accentColor] || '#4F46E5'; 
+
+        return (
+            <div className="mt-10">
+                <button 
+                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    className="flex items-center justify-between w-full p-4 text-xl font-extrabold text-white rounded-lg shadow-lg transition duration-200"
+                    style={{ backgroundColor: buttonColor, color: '#FFFFFF' }} // Pevné nastavení barvy
+                >
+                    Přehled výsledků (Mandáty: {totalMandatesAssigned}/{TOTAL_MANDATES})
+                    {isCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+                </button>
+
+                <div 
+                    className={`overflow-hidden transition-max-height duration-500 ease-in-out ${isCollapsed ? 'max-h-0' : 'max-h-screen mt-4'}`}
+                >
+                    <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-md">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            {/* OPRAVENO: Extrémní komprimace thead, aby se zamezilo chybě whitespace text node */}
+                            <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Strana</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Podíl (%)</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Mandáty</th></tr></thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {sortedResults.map(p => (
+                                    <tr key={p.party} className={`hover:bg-gray-50 transition ${!p.isQualified ? 'opacity-70' : ''}`}>
+                                        <td className="px-4 py-3 whitespace-nowrap text-md font-medium text-gray-800 flex items-center">
+                                            <span className="w-3 h-3 rounded-full mr-2 shadow-sm" style={{ backgroundColor: p.color }}></span>
+                                            {p.party}
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.votes}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">
+                                            {p.percentage.toFixed(2)}% 
+                                            {!p.isQualified && <span className="ml-2 text-xs text-red-500 font-semibold">(Prop)</span>}
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-lg text-center font-extrabold" style={{ color: buttonColor }}>
+                                            {p.mandates}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const ScenarioCard = ({ scenario, accentColor, title, totalVotes, results }) => {
+        const currentView = scenario === 's1' ? s1View : s2View;
+        const sId = scenario === 's1' ? 's1' : 's2';
+        const isMandate = (dataKey) => dataKey === 'mandates';
+
+        return (
+            <div className="mb-12 p-8 bg-white rounded-xl shadow-2xl border-t-4 border-b-4 border-gray-200">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b pb-3 border-gray-200">
+                    <h2 className="text-3xl font-extrabold text-gray-900">{title}</h2>
+                    <button onClick={() => setIsModalOpen(true)} className="px-5 py-2 bg-indigo-600 text-white rounded-full text-md font-bold hover:bg-indigo-700 transition shadow-lg">
+                        Vysvětlení Vzorce
+                    </button>
+                </div>
+                <p className="mb-6 text-sm text-gray-600">Celkem platných hlasů: <span className="font-bold text-gray-800">{totalVotes}</span></p>
+
+                {/* Sekce s přepínači */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 p-4 bg-gray-100 rounded-xl border border-gray-200">
+                    <VizToggleButtons 
+                        scenario={sId} 
+                        dataType="percent" 
+                        currentView={currentView.percent} 
+                        accentColor={accentColor}
+                    />
+                    <VizToggleButtons 
+                        scenario={sId} 
+                        dataType="mandate" 
+                        currentView={currentView.mandate} 
+                        accentColor={accentColor}
+                    />
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                    {/* Procenta / Hlasy */}
+                    <div>
+                        <h3 className="font-extrabold text-xl mb-3 text-gray-800">
+                            Procentuální Podíl
+                        </h3>
+                        {currentView.percent === 'bar' && 
+                            <ChartRenderer 
+                                type="bar" 
+                                data={results} 
+                                dataKey="percentage" 
+                                isMandate={isMandate('percentage')}
+                            />
+                        }
+                        {currentView.percent === 'pie' && 
+                            <ChartRenderer 
+                                type="pie" 
+                                data={results} 
+                                dataKey="percentage" 
+                                isMandate={isMandate('percentage')}
+                            />
+                        }
+                    </div>
+
+                    {/* Mandáty */}
+                    <div>
+                        <h3 className="font-extrabold text-xl mb-3 text-gray-800">
+                            Rozdělení Mandátů
+                        </h3>
+                        {currentView.mandate === 'bar' && 
+                            <ChartRenderer 
+                                type="bar" 
+                                data={results} 
+                                dataKey="mandates" 
+                                isMandate={isMandate('mandates')}
+                            />
+                        }
+                        {currentView.mandate === 'pie' && 
+                            <ChartRenderer 
+                                type="pie" 
+                                data={results} 
+                                dataKey="mandates" 
+                                isMandate={isMandate('mandates')}
+                            />
+                        }
+                        {currentView.mandate === 'seatmap' && 
+                            <SeatMapCanvas results={results} />
+                        }
+                    </div>
+                </div>
+
+                {/* Tabulka výsledků pod grafy - SBALITELNÁ */}
+                <ResultsTable results={results} accentColor={accentColor} />
+
+            </div>
+        );
+    };
+
+    // --- RENDER HLAVNÍ APLIKACE ---
+    return (
+        <div className="p-4 sm:p-8 min-h-screen font-sans bg-gray-50 text-gray-900">
+            <div className="max-w-6xl mx-auto bg-white shadow-2xl rounded-2xl p-6 sm:p-10 border border-gray-200">
+
+                {/* Hlava aplikace */}
+                <h1 className="text-4xl sm:text-5xl font-extrabold text-indigo-700 mb-2">
+                    📊 Analýza Školních Voleb
+                </h1>
+                {/* UPRAVENO: Zjednodušený úvodní popis */}
+                <p className="text-gray-600 mb-8 pb-4 border-b border-indigo-200 text-lg">
+                    Simulace rozdělení **{TOTAL_MANDATES} mandátů** pomocí D'Hondtovy metody a s **5%** volební klauzulí.
+                </p>
+
+                {/* 1. Původní data a účast */}
+                <div className="mb-12 p-6 bg-gray-100 rounded-xl border border-gray-200 shadow-md">
+                    <h2 className="text-2xl font-bold text-indigo-700 mb-4">1. Původní Hlasy a Volební Účast</h2>
+                    
+                    <div className="overflow-x-auto mb-8">
+                        {/* Tabulka se vyplní pomocí rawData */}
+                        <table className="min-w-full divide-y divide-gray-300 rounded-lg overflow-hidden">
+                            {/* OPRAVENO: Extrémní komprimace thead, aby se zamezilo chybě whitespace text node */}
+                            <thead className="bg-gray-200"><tr><th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Strana</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy Žáků</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy Učitelů</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy CELKEM</th></tr></thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {rawData.map(p => (
+                                    <tr key={p.party} className="hover:bg-gray-50 transition">
+                                        <td className="px-4 py-3 whitespace-nowrap text-md font-medium text-gray-800">{p.party}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.students}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.teachers}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-md text-center font-extrabold text-indigo-600">{p.students + p.teachers}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                            {/* OPRAVENO: Extrémní komprimace tfoot, aby se zamezilo chybě whitespace text node */}
+                            <tfoot className="bg-gray-200/80 font-extrabold border-t-2 border-indigo-500"><tr><td className="px-4 py-3 whitespace-nowrap text-md text-indigo-700">HLASY CELKEM:</td><td className="px-4 py-3 whitespace-nowrap text-md text-center text-indigo-700">{TOTAL_STUDENT_VOTES}</td><td className="px-4 py-3 whitespace-nowrap text-md text-center text-indigo-700">{TOTAL_TEACHER_VOTES}</td><td className="px-4 py-3 whitespace-nowrap text-md text-center text-indigo-700">{TOTAL_STUDENT_VOTES + TOTAL_TEACHER_VOTES}</td></tr></tfoot>
+                        </table>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-center">
+                        <TurnoutDisplay 
+                            label="Účast Studentů" 
+                            totalVotes={TOTAL_STUDENT_VOTES} 
+                            eligibleVoters={TOTAL_ELIGIBLE_STUDENTS} 
+                            color="fuchsia" 
+                        />
+                        <TurnoutDisplay 
+                            label="Celková Účast" 
+                            totalVotes={TOTAL_STUDENT_VOTES + TOTAL_TEACHER_VOTES} 
+                            eligibleVoters={TOTAL_ELIGIBLE_STUDENTS + TOTAL_ELIGIBLE_TEACHERS} 
+                            color="emerald" 
+                        />
+                    </div>
+                </div>
+
+                {/* 2. Scénář A: Jen Studenti (Akcent Indigo) */}
+                <ScenarioCard 
+                    scenario="s1"
+                    title="2. Scénář A: Hlasovali Jen Studenti"
+                    accentColor="Spolu" 
+                    totalVotes={s1.totalVotes}
+                    results={s1.results}
+                />
+
+                {/* 3. Scénář B: Žáci + Učitelé (Akcent Smaragdová) */}
+                <ScenarioCard 
+                    scenario="s2"
+                    title="3. Scénář B: Hlasovali Studenti i Učitelé"
+                    accentColor="STAN" 
+                    totalVotes={s2.totalVotes}
+                    results={s2.results}
+                />
+
+            </div>
+            
+            {/* MODALNÍ OKNO PRO VYSVĚTLENÍ VZORCE - S KROKOVOU SIMULACÍ */}
+            <div className={`fixed inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 ${isModalOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                <div 
+                    className={`bg-white text-gray-900 rounded-xl shadow-2xl max-w-4xl w-11/12 p-6 sm:p-8 transition-transform duration-300 ${isModalOpen ? 'scale-100' : 'scale-95'} border border-indigo-500/50`}
+                >
+                    <h3 className="text-3xl font-bold text-indigo-700 mb-4 border-b border-gray-200 pb-2">Jak se přepočítávají hlasy na mandáty</h3>
+                    <div className="text-gray-700 space-y-4 max-h-[70vh] overflow-y-auto pr-3">
+                        
+                        <h4 className="font-semibold text-xl text-fuchsia-600">1. D'Hondtova metoda (poměrné zastoupení)</h4>
+                        <p>Tato metoda se používá k tomu, aby se křesla (mandáty) rozdělily co nejspravedlivěji podle počtu získaných hlasů. Zároveň mírně zvýhodňuje silnější strany.</p>
+                        <p className="font-semibold text-gray-800">Jak se počítá kvocient:</p>
+                        <div className="bg-gray-100 p-4 rounded-lg border border-indigo-200 text-center">
+                            <p className="font-mono text-lg font-bold text-indigo-700">
+                                Kvócients = Hlasy strany / (Počet získaných mandátů + 1)
+                            </p>
+                        </div>
+                        <ul className="list-disc list-inside text-base pl-4 space-y-1">
+                            <li>Mandáty se rozdělují postupně, dokud se jich nerozdá všech **{TOTAL_MANDATES}**.</li>
+                            <li>V každém kroku získá mandát ta strana, která má po dělení **nejvyšší kvocient**.</li>
+                        </ul>
+
+                        <h4 className="font-semibold text-xl text-emerald-600">2. Volební klauzule (5 %)</h4>
+                        <p>Aby strana mohla získat jakýkoliv mandát, musí v celkovém součtu platných hlasů získat **alespoň 5 % hlasů**. Hlasy stran, které tuto hranici nepřekročí, propadají (nepočítají se do dělení mandátů).</p>
+
+                        <h4 className="font-semibold text-xl text-gray-700">3. Škálování dat pro simulaci</h4>
+                        <p>Protože se jedná o studentské volby s malým počtem hlasů, ale simulujeme rozdělení {TOTAL_MANDATES} mandátů (jako ve skutečných parlamentních volbách), vynásobili jsme pro přesnější výpočet D'Hondtovy metody všechny hlasy číslem **{VOTE_MULTIPLIER}**. Poměry mezi hlasy jednotlivých stran zůstávají stejné.</p>
+
+                        {/* NOVÁ ČÁST: KROKOVÁ SIMULACE */}
+                        <div className="pt-6">
+                            <h4 className="font-extrabold text-2xl text-indigo-700 border-t pt-4 mt-6 border-indigo-300">
+                                4. Krok za krokem: Simulace D'Hondtovy metody
+                            </h4>
+                            <p className="mb-4 text-sm text-gray-600">
+                                Níže vidíte, jak se rozdělují první a poslední mandáty (použita data ze Scénáře B: Žáci + Učitelé).
+                            </p>
+                            <DHondtStepTable steps={dhondtSteps} />
+                        </div>
+
+                    </div>
+                    <div className="mt-6 flex justify-end">
+                        <button onClick={() => setIsModalOpen(false)} className="px-6 py-2 bg-gray-400 text-gray-900 rounded-lg font-bold hover:bg-gray-500 transition shadow-md">
+                            Zavřít vysvětlení
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default App;
