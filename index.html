@@ -2,531 +2,478 @@
 <html lang="cs">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>📊 Analýza školních voleb – single-file HTML</title>
-  <!-- Tailwind CDN (JIT přes CDN) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React 18 + ReactDOM 18 (UMD) -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <!-- Babel pro JSX v prohlížeči (pouze pro demo / GH Pages) -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Recharts UMD build -->
-  <!-- Recharts UMD build (pinned version) -->
-  <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Školní volby – přepočet mandátů (d’Hondt)</title>
+  <!-- Pouze runtime React/ReactDOM z CDN – bez dalších závislostí/bundleru -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <style>
-    /* Jemné doladění vzhledu */
-    html, body { height: 100%; background: #F9FAFB; }
+    :root{
+      --bg:#0f172a;        /* slate-900 */
+      --panel:#111827;     /* gray-900 */
+      --muted:#9ca3af;     /* gray-400 */
+      --text:#e5e7eb;      /* gray-200 */
+      --acc:#60a5fa;       /* blue-400 */
+      --acc2:#34d399;      /* emerald-400 */
+      --danger:#f87171;    /* red-400 */
+      --seat:#a78bfa;      /* violet-400 */
+      --chip:#1f2937;      /* gray-800 */
+      --border:#1f2937;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+      color:var(--text); background:linear-gradient(180deg,#0b1224, #0f172a 40%);
+    }
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    h1{font-size:clamp(22px,3vw,30px);margin:0 0 12px}
+    .sub{color:var(--muted);margin-bottom:20px}
+    .panel{
+      background:rgba(17,24,39,.75); backdrop-filter: blur(6px);
+      border:1px solid var(--border); border-radius:16px; padding:16px; margin-bottom:16px;
+      box-shadow:0 8px 24px rgba(0,0,0,.35);
+    }
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .col{flex:1 1 280px}
+    .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input[type="number"], input[type="text"], select{
+      width:100%; background:#0b1020; color:var(--text);
+      border:1px solid var(--border); border-radius:10px; padding:10px 12px; outline:none;
+    }
+    input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button{ -webkit-appearance: none; margin: 0; }
+    .seg{display:flex;gap:8px;flex-wrap:wrap}
+    .seg button{
+      background:var(--chip); color:var(--text); border:1px solid var(--border);
+      padding:8px 12px; border-radius:999px; cursor:pointer;
+    }
+    .seg button.active{background:var(--acc);border-color:transparent}
+    .btn{
+      background:var(--acc); color:#0b1020; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600;
+    }
+    .btn.link{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+    .btn.secondary{background:var(--chip);color:var(--text)}
+    .table{width:100%;border-collapse:collapse;font-size:14px}
+    .table th,.table td{border-bottom:1px solid var(--border);padding:8px 6px;text-align:left}
+    .tag{display:inline-flex;align-items:center;gap:8px;background:var(--chip);border:1px solid var(--border);border-radius:999px;padding:6px 10px;margin:4px 6px 0 0}
+    .tag b{font-variant-numeric: tabular-nums}
+    .muted{color:var(--muted)}
+    .warn{color:var(--danger)}
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .legend .sw{width:12px;height:12px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:middle;border:1px solid #0003}
+    /* modal */
+    .modal-backdrop{position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:50}
+    .modal{background:var(--panel);border:1px solid var(--border);border-radius:16px;max-width:1000px;width:92vw;max-height:86vh;overflow:auto;padding:16px}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;background:#0b1020;border:1px solid var(--border);border-radius:8px;padding:2px 6px}
+    .note{font-size:13px;color:var(--muted)}
+    .hr{height:1px;background:var(--border);margin:10px 0}
+    .cards{display:flex;gap:12px;flex-wrap:wrap}
+    .card{flex:1 1 260px;border:1px solid var(--border);border-radius:14px;padding:12px;background:#0b1020}
+    .seat{width:10px;height:10px;border-radius:50%;margin:1px;display:inline-block}
+    .grid-seats{display:flex;flex-wrap:wrap;gap:2px}
+    .foot{margin-top:8px;color:var(--muted);font-size:12px}
+    .small{font-size:12px}
+    .pill{display:inline-flex;gap:6px;align-items:center;background:#0b1020;border:1px solid var(--border);border-radius:999px;padding:4px 8px;color:var(--muted)}
   </style>
 </head>
-<body class="min-h-screen">
-  <div id="root"></div>
+<body>
+<div class="wrap">
+  <h1>Školní volby – přepočet na mandáty (d’Hondt, 5%)</h1>
+  <div class="sub">Interaktivní aplikace pro středoškoláky. Můžeš upravit vstupy, zvolit typ grafu a otevřít detailní vysvětlení výpočtu.</div>
 
-  <!-- APLIKACE -->
-  <script type="text/babel">
-    // ZAJIŠTĚNÍ NAČTENÍ KNIHOVEN PŘED STARTEM APLIKACE
-    window.addEventListener('load', () => {
-      if (!window.Recharts) {
-        const rootEl = document.getElementById('root');
-        rootEl.innerHTML = '<div class="max-w-xl mx-auto mt-10 p-4 bg-red-50 border border-red-200 rounded">'+
-          '<h2 class="text-red-700 font-bold mb-2">Chyba: knihovna Recharts se nenačetla</h2>'+
-          '<p class="text-sm text-red-700">Zkontroluj internetové připojení nebo načtení CDN skriptů. Pokud běžíš lokálně přes file://, mělo by to i tak fungovat. Zkus stránku obnovit.</p>'+
-          '</div>';
-        return;
-      }
+  <div id="app"></div>
+</div>
 
-      const { useState, useMemo, useRef, useEffect, useCallback, memo } = React;
-      const {
-        ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-        XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList
-      } = window.Recharts;
+<script>
+const { useMemo, useState } = React;
 
-      // ---- původní kód pokračuje níže ----
-    const { useState, useMemo, useRef, useEffect, useCallback, memo } = React;
-    const {
-      ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-      XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList
-    } = Recharts;
+// --- VSTUPNÍ DATA (podle obrázku)
+const RAW = [
+  {name:"Spolu",     students:26, teachers:4, color:"#60a5fa"},
+  {name:"SPD",       students:1,  teachers:0, color:"#fb7185"},
+  {name:"Motoristé", students:5,  teachers:1, color:"#f59e0b"},
+  {name:"MZH",       students:1,  teachers:0, color:"#34d399"},
+  {name:"Generace",  students:1,  teachers:0, color:"#a78bfa"},
+  {name:"Levice",    students:1,  teachers:0, color:"#f472b6"},
+  {name:"SMS",       students:1,  teachers:0, color:"#22d3ee"},
+  {name:"Přísaha",   students:1,  teachers:0, color:"#f97316"},
+  {name:"Voluntia",  students:3,  teachers:0, color:"#84cc16"},
+  {name:"Ano",       students:2,  teachers:0, color:"#93c5fd"},
+  {name:"Rebelové",  students:3,  teachers:0, color:"#fca5a5"},
+  {name:"Koruna",    students:1,  teachers:1, color:"#67e8f9"},
+  {name:"STAN",      students:35, teachers:4, color:"#34d399"},
+  {name:"Piráti",    students:24, teachers:1, color:"#a3e635"},
+];
 
-    // --- 1. DATA A KONSTANTY ---
-    const rawData = [
-      { party: "Spolu", students: 26, teachers: 4 },
-      { party: "SPD", students: 1, teachers: 0 },
-      { party: "Motoristé", students: 5, teachers: 1 },
-      { party: "MZH", students: 1, teachers: 0 },
-      { party: "Generace", students: 1, teachers: 0 },
-      { party: "Levice", students: 1, teachers: 0 },
-      { party: "SMS", students: 1, teachers: 0 },
-      { party: "Přísaha", students: 1, teachers: 0 },
-      { party: "Voluntia", students: 3, teachers: 0 },
-      { party: "Ano", students: 2, teachers: 0 },
-      { party: "Rebelové", students: 3, teachers: 1 },
-      { party: "Koruna", students: 1, teachers: 1 },
-      { party: "STAN", students: 35, teachers: 4 },
-      { party: "Piráti", students: 24, teachers: 1 },
-    ];
+// Pomocná utilita
+const sum = arr => arr.reduce((a,b)=>a+b,0);
+const formatPct = x => (x*100).toFixed(2).replace(".",",")+" %";
 
-    const TOTAL_STUDENT_VOTES = 105;
-    const TOTAL_TEACHER_VOTES = 11;
-    const TOTAL_ELIGIBLE_STUDENTS = 182;
-    const TOTAL_ELIGIBLE_TEACHERS = 11;
+// d’Hondt výpočet s 5% klauzulí
+function dhondtAllocate(parties, seats=200, thresholdPct=0.05){
+  const total = sum(parties.map(p=>p.votes));
+  const eligible = parties.filter(p => total>0 ? (p.votes/total)>=thresholdPct : false);
+  // Pokud nikdo nepřekročí 5 %, bereme všechno (aby appka nepadla) – školní režim
+  const list = eligible.length? eligible : parties;
 
-    const TOTAL_MANDATES = 200;
-    const VOTE_MULTIPLIER = 1000;
-    const THRESHOLD_PERCENT = 5;
+  // Generujeme kvocienty
+  const quotients = [];
+  list.forEach(p=>{
+    for(let d=1; d<=seats; d++){
+      quotients.push({party:p.name, value:p.votes/d, divisor:d});
+    }
+  });
+  // Top-N kvocientů
+  quotients.sort((a,b)=>b.value - a.value);
+  const cut = quotients.slice(0, seats);
 
-    const PARTY_COLORS = {
-      "Spolu": "#4F46E5",
-      "SPD": "#DC2626",
-      "Motoristé": "#F59E0B",
-      "MZH": "#9CA3AF",
-      "Generace": "#C026D3",
-      "Levice": "#0D9488",
-      "SMS": "#2563EB",
-      "Přísaha": "#7C3AED",
-      "Voluntia": "#EC4899",
-      "Ano": "#FCD34D",
-      "Rebelové": "#4B5563",
-      "Koruna": "#9CA3AF",
-      "STAN": "#10B981",
-      "Piráti": "#EA580C",
-    };
+  // Sčítání mandátů
+  const seatMap = Object.fromEntries(list.map(p=>[p.name,0]));
+  cut.forEach(q=> seatMap[q.party]++ );
 
-    // --- 2. LOGIKA D'HONDTovy METODY ---
-    const calculateDHondt = (votes, totalMandates) => {
-      const qualifiedParties = votes.filter(p => p.percentage >= THRESHOLD_PERCENT);
-      if (qualifiedParties.length === 0) {
-        return votes.map(p => ({
-          party: p.party,
-          votes: p.votes / VOTE_MULTIPLIER,
-          percentage: p.percentage,
-          mandates: 0,
-          color: PARTY_COLORS[p.party] || '#000000',
-          isQualified: false,
-        }));
-      }
+  return {
+    totalVotes: total,
+    participating: list.map(p=>p.name),
+    seatsByParty: seatMap,
+    quotients: cut, // zobrazení v modálu
+    thresholdApplied: eligible.length>0,
+  };
+}
 
-      qualifiedParties.forEach(p => p.mandates = 0);
-      const divisors = qualifiedParties.map(p => ({ party: p.party, votes: p.votes, divisor: p.votes }));
+// SVG GRAFY -------------------------------------------------
+function BarChart({data, valueKey="value", labelKey="name", colors, height=260, padding=28}){
+  const w = 920;
+  const max = Math.max(...data.map(d=>d[valueKey]), 1);
+  const barW = (w - padding*2) / data.length;
+  return React.createElement('svg',{viewBox:`0 0 ${w} ${height}`,width:"100%",height},
+    // osy
+    React.createElement('line',{x1:padding,y1:height-24,x2:w-padding,y2:height-24,stroke:"#334155",strokeWidth:1}),
+    data.map((d,i)=>{
+      const h = (height-60) * (d[valueKey]/max);
+      const x = padding + i*barW + 6;
+      const y = height-26 - h;
+      return React.createElement(React.Fragment,{key:i},
+        React.createElement('rect',{x,y,width:barW-12,height:h,fill:colors[d[labelKey]]||"#60a5fa"}),
+        React.createElement('text',{x:x+(barW-12)/2,y:height-8,fill:"#cbd5e1",fontSize:12,textAnchor:"middle"}, d[labelKey]),
+        React.createElement('text',{x:x+(barW-12)/2,y:y-4,fill:"#e5e7eb",fontSize:12,textAnchor:"middle"},
+          typeof d[valueKey]==='number' ? d[valueKey].toFixed(0) : d[valueKey])
+      );
+    })
+  );
+}
 
-      for (let i = 0; i < totalMandates; i++) {
-        divisors.sort((a, b) => b.divisor - a.divisor);
-        const winner = divisors[0];
-        if (!winner) break;
-        const originalParty = qualifiedParties.find(p => p.party === winner.party);
-        if (originalParty) originalParty.mandates++;
-        winner.divisor = winner.votes / (originalParty.mandates + 1);
-      }
+function PieChart({data, valueKey="value", labelKey="name", colors, radius=120}){
+  const total = data.reduce((a,b)=>a + (b[valueKey]||0),0) || 1;
+  let angle = -Math.PI/2;
+  const cx=160, cy=160;
+  const arcs = data.map((d,i)=>{
+    const slice = 2*Math.PI*(d[valueKey]/total);
+    const x1 = cx + radius*Math.cos(angle);
+    const y1 = cy + radius*Math.sin(angle);
+    angle += slice;
+    const x2 = cx + radius*Math.cos(angle);
+    const y2 = cy + radius*Math.sin(angle);
+    const largeArc = slice > Math.PI ? 1:0;
+    const path = `M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+    return {path, name:d[labelKey], value:d[valueKey]};
+  });
+  return React.createElement('div',{style:{display:"flex",gap:"16px",alignItems:"center",flexWrap:"wrap"}},
+    React.createElement('svg',{viewBox:"0 0 320 320",width:320,height:320},
+      arcs.map((a,i)=>React.createElement('path',{key:i,d:a.path,fill:colors[a.name]||"#60a5fa",stroke:"#0b1020",strokeWidth:1}))
+    ),
+    React.createElement('div',null,
+      data.map((d,i)=>React.createElement('div',{key:i,className:"tag"},
+        React.createElement('span',{className:"sw",style:{background:colors[d[labelKey]]||"#60a5fa"}}),
+        React.createElement('span',null,d[labelKey]),
+        React.createElement('b',null, typeof d[valueKey]==='number' ? d[valueKey].toFixed(2) : d[valueKey])
+      ))
+    )
+  );
+}
 
-      return votes.map(p => {
-        const qualified = qualifiedParties.find(q => q.party === p.party);
-        return {
-          party: p.party,
-          votes: p.votes / VOTE_MULTIPLIER,
-          percentage: p.percentage,
-          mandates: qualified ? qualified.mandates : 0,
-          color: PARTY_COLORS[p.party] || '#000000',
-          isQualified: !!qualified,
-        };
+function SeatChart({seatsByParty, colors, totalSeats=200}){
+  // poloválcové uspořádání 200 "křesel"
+  const seats = [];
+  Object.entries(seatsByParty).forEach(([name, n])=>{
+    for(let i=0;i<n;i++) seats.push(name);
+  });
+  // doplň prázdná místa (když nikdo neprošel)
+  while(seats.length<totalSeats) seats.push("_");
+  const cols = 25; // 8 řad po ~25
+  return React.createElement('div',null,
+    React.createElement('div',{className:"grid-seats"},
+      seats.map((p,i)=>React.createElement('span',{
+        key:i,className:"seat",
+        style:{background: p==="_" ? "#334155" : (colors[p]||"#60a5fa")}
+      }))
+    ),
+    React.createElement('div',{className:"legend"},
+      Object.entries(seatsByParty).map(([name,val])=>
+        React.createElement('div',{key:name,className:"tag"},
+          React.createElement('span',{className:"sw",style:{background:colors[name]||"#60a5fa"}}),
+          React.createElement('span',null,`${name}`),
+          React.createElement('b',null,`${val}`)
+        )
+      )
+    )
+  );
+}
+
+// VYSVĚTLENÍ – MODÁL
+function Modal({open,onClose,children,title}){
+  if(!open) return null;
+  return React.createElement('div',{className:"modal-backdrop",onClick:onClose},
+    React.createElement('div',{className:"modal",onClick:e=>e.stopPropagation()},
+      React.createElement('div',{className:"row",style:{alignItems:"center",marginBottom:6}},
+        React.createElement('h2',{style:{margin:"0 8px 0 0"}}, title || "Vysvětlení"),
+        React.createElement('span',{className:"pill"}, "Metoda d’Hondt · 5% klauzule"),
+        React.createElement('div',{style:{flex:1}}),
+        React.createElement('button',{className:"btn secondary",onClick:onClose},"Zavřít")
+      ),
+      children
+    )
+  );
+}
+
+// HLAVNÍ APLIKACE
+function App(){
+  const [mode, setMode] = useState("students"); // students | both
+  const [metric, setMetric] = useState("percent"); // percent | seats | turnout
+  const [chart, setChart] = useState("bars"); // bars | pie | seats
+  const [seatCount, setSeatCount] = useState(200);
+  const [threshold, setThreshold] = useState(5);
+  const [multS, setMultS] = useState(1);
+  const [multT, setMultT] = useState(1);
+  // Účast – výchozí hodnoty z obrázku; lze upravit
+  const [eligibleS, setEligibleS] = useState(182); // hlasující celkem (žáci) – můžeš změnit na "oprávněných"
+  const [votedS, setVotedS] = useState(182);
+  const [eligibleT, setEligibleT] = useState(11);
+  const [votedT, setVotedT] = useState(11);
+
+  const colors = Object.fromEntries(RAW.map(p=>[p.name, p.color || "#60a5fa"]));
+
+  const dataset = useMemo(()=>{
+    // postav hlasové vstupy podle režimu
+    return RAW.map(p=>{
+      const s = p.students * multS;
+      const t = p.teachers * multT;
+      return {
+        name:p.name,
+        votes: mode==="students" ? s : (s+t),
+        baseStudents: p.students,
+        baseTeachers: p.teachers
+      };
+    });
+  }, [mode, multS, multT]);
+
+  const totals = useMemo(()=>{
+    const totalVotes = sum(dataset.map(p=>p.votes));
+    const percents = dataset.map(p=>({
+      name:p.name,
+      value: totalVotes? (p.votes/totalVotes*100):0
+    }));
+    const dh = dhondtAllocate(dataset, seatCount, threshold/100);
+    return { totalVotes, percents, dh };
+  }, [dataset, seatCount, threshold]);
+
+  const percentData = totals.percents
+      .sort((a,b)=>b.value-a.value)
+      .map(d=>({name:d.name, value:+d.value.toFixed(2)}));
+
+  const seatData = Object.entries(totals.dh.seatsByParty)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([name,v])=>({name, value:v}));
+
+  const turnout = useMemo(()=>{
+    const eligible = (mode==="students"? eligibleS : eligibleS+eligibleT);
+    const voted    = (mode==="students"? votedS    : votedS+votedT);
+    const pct = eligible>0 ? (voted/eligible*100) : 0;
+    return {eligible, voted, pct};
+  }, [mode, eligibleS, eligibleT, votedS, votedT]);
+
+  // obsah grafu
+  function chartNode(){
+    const current = metric==="percent"? percentData : (metric==="seats"? seatData : [{name:"Účast", value: turnout.pct}]);
+    if(chart==="bars"){
+      return React.createElement(BarChart,{
+        data: current, valueKey:"value", labelKey:"name", colors
       });
-    };
+    }
+    if(chart==="pie"){
+      return React.createElement(PieChart,{
+        data: current, valueKey:"value", labelKey:"name", colors
+      });
+    }
+    return React.createElement(SeatChart,{seatsByParty: totals.dh.seatsByParty, colors, totalSeats: seatCount});
+  }
 
-    const calculateScenario = (data, totalValidVotes, totalEligibleVoters) => {
-      const totalVotes = data.reduce((sum, p) => sum + p.votes, 0);
-      const resultsWithPercent = data.map(p => ({ ...p, percentage: (p.votes / totalVotes) * 100 }));
-      const dataForDHondt = resultsWithPercent.map(p => ({ ...p, votes: p.votes * VOTE_MULTIPLIER }));
-      const results = calculateDHondt(dataForDHondt, TOTAL_MANDATES);
-      const turnout = (totalValidVotes / totalEligibleVoters) * 100;
-      return { totalVotes: totalValidVotes, turnout, results };
-    };
+  // MODÁL – vysvětlení d’Hondta
+  const [open, setOpen] = useState(false);
 
-    // --- KROKOVÁ SIMULACE ---
-    const getDHondtSteps = (data, totalMandates, multiplier, threshold) => {
-      const combinedData = data.map(p => ({ party: p.party, votes: p.students + p.teachers }));
-      const totalVotes = combinedData.reduce((s, p) => s + p.votes, 0);
-      const resultsWithPercent = combinedData.map(p => ({
-        ...p,
-        percentage: (p.votes / totalVotes) * 100,
-        votes: p.votes * multiplier,
-      }));
-      const qualifiedParties = resultsWithPercent.filter(p => p.percentage >= threshold);
-      if (qualifiedParties.length === 0) return [];
-      qualifiedParties.forEach(p => p.mandates = 0);
-      const divisors = qualifiedParties.map(p => ({ party: p.party, votes: p.votes, divisor: p.votes }));
-      const steps = [];
-      for (let i = 0; i < totalMandates; i++) {
-        const currentDivisors = divisors.map(d => {
-          const partyResult = qualifiedParties.find(p => p.party === d.party);
-          return { party: d.party, votes: d.votes, divisor: d.divisor, mandates: partyResult ? partyResult.mandates : 0 };
-        });
-        divisors.sort((a, b) => b.divisor - a.divisor);
-        const winner = divisors[0];
-        if (!winner) break;
-        const originalParty = qualifiedParties.find(p => p.party === winner.party);
-        steps.push({ mandateNo: i + 1, winnerParty: winner.party, stateBefore: currentDivisors });
-        if (originalParty) originalParty.mandates++;
-        winner.divisor = winner.votes / (originalParty.mandates + 1);
-      }
-      return steps;
-    };
+  return React.createElement(React.Fragment,null,
+    React.createElement('div',{className:"panel"},
+      React.createElement('div',{className:"row"},
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Režim dat"),
+          React.createElement('div',{className:"seg"},
+            React.createElement('button',{className: mode==="students"?"active":"", onClick:()=>setMode("students")},"Jen žáci"),
+            React.createElement('button',{className: mode==="both"?"active":"", onClick:()=>setMode("both")},"Žáci + učitelé"),
+            React.createElement('span',{className:"pill"}, `Celkem hlasů: ${totals.totalVotes}`)
+          )
+        ),
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Zobrazená metrika"),
+          React.createElement('div',{className:"seg"},
+            React.createElement('button',{className: metric==="percent"?"active":"", onClick:()=>setMetric("percent")},"A) Procenta"),
+            React.createElement('button',{className: metric==="seats"?"active":"", onClick:()=>setMetric("seats")},"B) Mandáty"),
+            React.createElement('button',{className: metric==="turnout"?"active":"", onClick:()=>setMetric("turnout")},"C) Účast")
+          )
+        ),
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Typ grafu"),
+          React.createElement('div',{className:"seg"},
+            React.createElement('button',{className: chart==="bars"?"active":"", onClick:()=>setChart("bars")},"Sloupce"),
+            React.createElement('button',{className: chart==="pie"?"active":"", onClick:()=>setChart("pie")},"Koláč"),
+            React.createElement('button',{className: chart==="seats"?"active":"", onClick:()=>setChart("seats")},"Křesla")
+          )
+        )
+      ),
+      React.createElement('div',{className:"row"},
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Počet mandátů"),
+          React.createElement('input',{type:"number",min:1,max:500,value:seatCount,onChange:e=>setSeatCount(+e.target.value || 0)})
+        ),
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Práh pro vstup (5% v ČR)"),
+          React.createElement('input',{type:"number",min:0,max:10,step:"0.1",value:threshold,onChange:e=>setThreshold(+e.target.value)})
+        ),
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Multiplikátor hlasů (škálování)"),
+          React.createElement('div',{className:"row"},
+            React.createElement('div',{className:"col"},
+              React.createElement('input',{type:"number",step:"0.1",value:multS,onChange:e=>setMultS(+e.target.value || 0)}),
+              React.createElement('div',{className:"small muted"},"× žáci")
+            ),
+            React.createElement('div',{className:"col"},
+              React.createElement('input',{type:"number",step:"0.1",value:multT,onChange:e=>setMultT(+e.target.value || 0)}),
+              React.createElement('div',{className:"small muted"},"× učitelé")
+            )
+          )
+        )
+      ),
+      React.createElement('div',{className:"row"},
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Účast – žáci (oprávnění / hlasovalo)"),
+          React.createElement('div',{className:"row"},
+            React.createElement('div',{className:"col"},
+              React.createElement('input',{type:"number",value:eligibleS,onChange:e=>setEligibleS(+e.target.value||0)}),
+              React.createElement('div',{className:"small muted"},"Oprávněných žáků")
+            ),
+            React.createElement('div',{className:"col"},
+              React.createElement('input',{type:"number",value:votedS,onChange:e=>setVotedS(+e.target.value||0)}),
+              React.createElement('div',{className:"small muted"},"Hlasovalo žáků")
+            )
+          )
+        ),
+        React.createElement('div',{className:"col controls"},
+          React.createElement('label',null,"Účast – učitelé (oprávnění / hlasovalo)"),
+          React.createElement('div',{className:"row"},
+            React.createElement('div',{className:"col"},
+              React.createElement('input',{type:"number",value:eligibleT,onChange:e=>setEligibleT(+e.target.value||0)}),
+              React.createElement('div',{className:"small muted"},"Oprávněných učitelů")
+            ),
+            React.createElement('div',{className:"col"},
+              React.createElement('input',{type:"number",value:votedT,onChange:e=>setVotedT(+e.target.value||0)}),
+              React.createElement('div',{className:"small muted"},"Hlasovalo učitelů")
+            )
+          )
+        ),
+        React.createElement('div',{className:"col",style:{display:"flex",alignItems:"flex-end",gap:"8px"}},
+          React.createElement('button',{className:"btn",onClick:()=>setOpen(true)},"Jak se počítají mandáty?")
+        )
+      )
+    ),
 
-    // --- 3. KOMPONENTY VIZUALIZACE ---
-    const SeatMapCanvas = memo(function SeatMapCanvas({ results }) {
-      const canvasRef = useRef(null);
-      const drawSeatMap = useCallback(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        const scale = window.devicePixelRatio || 1;
-        const displayWidth = canvas.clientWidth;
-        const displayHeight = canvas.clientHeight;
-        canvas.width = displayWidth * scale;
-        canvas.height = displayHeight * scale;
-        ctx.setTransform(scale, 0, 0, scale, 0, 0);
-        const width = displayWidth;
-        const height = displayHeight;
-        ctx.clearRect(0, 0, width, height);
-        const cols = 20, rows = 10, padding = 10, cellMargin = 3;
-        const cellWidth = (width - padding * 2 - cellMargin * (cols - 1)) / cols;
-        const cellHeight = (height - padding * 2 - cellMargin * (rows - 1)) / rows;
-        let seatAssignments = [];
-        const sortedResults = [...results].sort((a, b) => b.mandates - a.mandates);
-        sortedResults.filter(p => p.mandates > 0).forEach(p => {
-          for (let i = 0; i < p.mandates; i++) seatAssignments.push(p.party);
-        });
-        seatAssignments = seatAssignments.slice(0, TOTAL_MANDATES);
-        for (let i = 0; i < TOTAL_MANDATES; i++) {
-          const col = i % cols;
-          const row = Math.floor(i / cols);
-          const x = padding + col * (cellWidth + cellMargin);
-          const y = padding + row * (cellHeight + cellMargin);
-          const party = seatAssignments[i];
-          ctx.beginPath();
-          ctx.arc(x + cellWidth / 2, y + cellHeight / 2, Math.min(cellWidth, cellHeight) * 0.45, 0, 2 * Math.PI);
-          ctx.fillStyle = party ? PARTY_COLORS[party] : '#ccc';
-          ctx.fill();
-          ctx.strokeStyle = '#E5E7EB';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
-      }, [results]);
+    React.createElement('div',{className:"panel"}, chartNode()),
 
-      useEffect(() => {
-        const handler = () => drawSeatMap();
-        window.addEventListener('load', handler);
-        window.addEventListener('resize', handler);
-        handler();
-        return () => {
-          window.removeEventListener('load', handler);
-          window.removeEventListener('resize', handler);
-        };
-      }, [drawSeatMap]);
+    React.createElement('div',{className:"panel"},
+      React.createElement('h3',null,"Přehled čísel"),
+      React.createElement('div',{className:"cards"},
+        React.createElement('div',{className:"card"},
+          React.createElement('div',{className:"muted small"},"A) Procenta (z platných hlasů)"),
+          React.createElement('table',{className:"table"},
+            React.createElement('thead',null,
+              React.createElement('tr',null,
+                React.createElement('th',null,"Strana"),
+                React.createElement('th',null,"Procenta"),
+                React.createElement('th',null,"Hlasy")
+              )
+            ),
+            React.createElement('tbody',null,
+              percentData.map(r=>React.createElement('tr',{key:r.name},
+                React.createElement('td',null,r.name),
+                React.createElement('td',null, r.value.toFixed(2).replace(".",",")+" %"),
+                React.createElement('td',null, dataset.find(p=>p.name===r.name).votes.toFixed(0))
+              ))
+            )
+          )
+        ),
+        React.createElement('div',{className:"card"},
+          React.createElement('div',{className:"muted small"},"B) Mandáty (d’Hondt, práh "+threshold+"%)"),
+          React.createElement('table',{className:"table"},
+            React.createElement('thead',null,
+              React.createElement('tr',null,
+                React.createElement('th',null,"Strana"),
+                React.createElement('th',null,"Mandáty")
+              )
+            ),
+            React.createElement('tbody',null,
+              seatData.map(r=>React.createElement('tr',{key:r.name},
+                React.createElement('td',null,r.name),
+                React.createElement('td',null,r.value)
+              )),
+              seatData.length===0 && React.createElement('tr',null,
+                React.createElement('td',{colSpan:2,className:"muted"},"Nikdo nepřekročil práh – zobrazeno 0.")
+              )
+            )
+          ),
+          React.createElement('div',{className:"foot"}, `Rozděleno ${sum(seatData.map(x=>x.value))} z ${seatCount} mandátů.`)
+        ),
+        React.createElement('div',{className:"card"},
+          React.createElement('div',{className:"muted small"},"C) Volební účast"),
+          React.createElement('div',{style:{fontSize:28,fontWeight:700,marginTop:6}}, formatPct(turnout.pct/100)),
+          React.createElement('div',{className:"note"}, `Hlasovalo ${turnout.voted} z ${turnout.eligible} oprávněných (režim: ${mode==="students"?"jen žáci":"žáci + učitelé"}).`)
+        )
+      )
+    ),
 
-      return (
-        <canvas
-          ref={canvasRef}
-          className="w-full h-auto max-w-full rounded-lg bg-gray-100 border border-gray-300"
-          style={{ width: '100%', height: 'auto', aspectRatio: '2 / 1' }}
-        />
-      );
-    });
+    React.createElement(Modal,{open,onClose:()=>setOpen(false),title:"Jak se počítají mandáty (d’Hondt)"},
+      React.createElement('p',null,"1) Spočítají se platné hlasy pro každou stranu. 2) Strany pod ", React.createElement('span',{className:"kbd"},"5 %"), " z celkového součtu jsou vyloučeny. 3) U každé zbylé strany se vytvoří řada kvocientů: hlasů / 1, /2, /3, … až do počtu rozdělovaných mandátů. 4) Všech ", seatCount, " nejvyšších kvocientů získá mandát. Počet mandátů strany = kolikrát se objeví v top seznamu."),
+      React.createElement('div',{className:"hr"}),
+      React.createElement('h4',null,"Tabulka nejvyšších kvocientů"),
+      React.createElement('div',{className:"note"},"Zobrazeno prvních 50 ze ", seatCount, " přidělených mandátů (aktuální režim vstupů)."),
+      React.createElement('table',{className:"table small"},
+        React.createElement('thead',null,React.createElement('tr',null,
+          React.createElement('th',null,"Poř."),
+          React.createElement('th',null,"Strana"),
+          React.createElement('th',null,"Kvocient"),
+          React.createElement('th',null,"Dělitel")
+        )),
+        React.createElement('tbody',null,
+          totals.dh.quotients.slice(0,50).map((q,i)=>React.createElement('tr',{key:i},
+            React.createElement('td',null,i+1),
+            React.createElement('td',null,q.party),
+            React.createElement('td',null,q.value.toFixed(4)),
+            React.createElement('td',null,"/"+q.divisor)
+          ))
+        )
+      ),
+      React.createElement('div',{className:"hr"}),
+      React.createElement('div',{className:"note"},"Pozn.: Jednotné násobení všech hlasů (multiplikátory) na rozdělení mandátů nic nemění, protože se násobí jak čitatel, tak kvocienty. V appce slouží hlavně pro didaktickou simulaci.")
+    )
+  );
+}
 
-    const ChartRenderer = ({ type, data, dataKey, isMandate }) => {
-      const sortedData = useMemo(() => {
-        if (!data) return [];
-        return [...data].sort((a, b) => b[dataKey] - a[dataKey]);
-      }, [data, dataKey]);
-      const unit = isMandate ? '' : '%';
-      const labelFormatter = (value) => isMandate ? value.toFixed(0) : value.toFixed(1) + '%';
-      const pieData = useMemo(() => {
-        if (!sortedData || type !== 'pie') return [];
-        return sortedData.filter(p => p[dataKey] > 0).map(p => ({ name: p.party, value: p[dataKey], color: p.color }));
-      }, [sortedData, dataKey, type]);
-
-      if (type === 'bar') {
-        const chartData = sortedData.map(p => ({ name: p.party, value: p[dataKey], color: p.color, isQualified: p.isQualified }));
-        return (
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#D1D5DB" />
-              <XAxis dataKey="name" stroke="#4B5563" interval={0} angle={-45} textAnchor="end" height={80} />
-              <YAxis stroke="#4B5563" tickFormatter={labelFormatter} />
-              <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #D1D5DB', borderRadius: '8px' }} formatter={(value, name, props) => [labelFormatter(value), props.payload.name]} labelFormatter={(label) => label} />
-              <Bar dataKey="value" name={isMandate ? "Mandáty" : "Procenta hlasů"}>
-                {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} opacity={entry.isQualified ? 1 : 0.4} />
-                ))}
-                <LabelList dataKey="value" position="top" formatter={(value) => isMandate ? value.toFixed(0) : value.toFixed(1)} fill="#4B5563" fontSize={12} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        );
-      }
-
-      if (type === 'pie') {
-        return (
-          <div className="flex justify-center items-center h-[400px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={pieData} cx="50%" cy="50%" outerRadius={150} fill="#8884d8" dataKey="value" nameKey="name" labelLine={false} label={false}>
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #D1D5DB', borderRadius: '8px', color: '#374151' }} formatter={(value, name) => [`${value.toFixed(2)}${unit}`, name]} />
-                <Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ paddingLeft: '20px', color: '#4B5563' }} formatter={(value, entry) => {
-                  const dataEntry = pieData.find(d => d.name === value);
-                  const displayValue = dataEntry ? (isMandate ? dataEntry.value.toFixed(0) : dataEntry.value.toFixed(2) + '%') : '';
-                  return <span style={{ color: entry.color || '#374151', fontWeight: 'bold' }}>{value} ({displayValue})</span>;
-                }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        );
-      }
-      return null;
-    };
-
-    const DHondtStepTable = memo(function DHondtStepTable({ steps }) {
-      if (!steps || steps.length === 0) return <p className="text-red-500">Žádné strany neprošly klauzulí 5%.</p>;
-      const visibleSteps = steps.slice(0, 5);
-      const lastSteps = steps.length > 10 ? steps.slice(-5) : [];
-      const partyNames = steps[0].stateBefore.map(d => d.party).sort();
-
-      const renderStep = (step, isLast) => {
-        const sortedState = [...step.stateBefore].sort((a, b) => a.party.localeCompare(b.party));
-        return (
-          <tr key={step.mandateNo} className={`text-sm ${isLast ? 'bg-yellow-50' : 'bg-white'} hover:bg-gray-100 transition duration-150`}>
-            <td className="px-3 py-2 text-center font-bold border-r border-gray-200 text-lg bg-indigo-100/70 text-indigo-800 sticky left-0">{step.mandateNo}.</td>
-            {sortedState.map((partyData) => {
-              const isWinner = partyData.party === step.winnerParty;
-              return (
-                <td key={partyData.party} className={`px-4 py-2 text-center text-gray-700 whitespace-nowrap border-r border-gray-200 ${isWinner ? 'bg-emerald-100 font-extrabold text-emerald-800 border-l-4 border-emerald-500' : ''}`}>
-                  <span className={`block text-lg ${isWinner ? 'text-xl' : ''}`}>
-                    {partyData.divisor.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                  </span>
-                  <span className="block text-xs text-gray-500">Mandáty: {partyData.mandates} / Dělitel: {partyData.mandates + 1}</span>
-                </td>
-              );
-            })}
-          </tr>
-        );
-      };
-
-      return (
-        <div className="overflow-x-auto border border-gray-300 rounded-lg shadow-inner">
-          <p className="p-3 font-semibold text-gray-700 bg-gray-50 border-b border-gray-200">Příklad: Rozdělení mandátů dle D'Hondta (Scénář B: Žáci + Učitelé). Zvýrazněný sloupec (kvocient) získá mandát.</p>
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-200">
-              <tr>
-                <th className="px-3 py-2 text-center text-xs font-bold text-gray-700 uppercase tracking-wider sticky left-0 z-10 bg-indigo-200/90 shadow-sm">Mandát #</th>
-                {partyNames.map(party => (
-                  <th key={party} className="px-4 py-2 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    {party}
-                    <span className="block h-2 w-full rounded-full mt-1" style={{ backgroundColor: PARTY_COLORS[party] }}></span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {visibleSteps.map(step => renderStep(step, false))}
-              {lastSteps.length > 0 && (
-                <tr className="bg-gray-300/80">
-                  <td colSpan={partyNames.length + 1} className="text-center py-2 text-md font-bold text-gray-700">. . . {steps.length - 10} MANDÁTŮ VYNECHÁNO . . .</td>
-                </tr>
-              )}
-              {lastSteps.map(step => renderStep(step, true))}
-            </tbody>
-          </table>
-        </div>
-      );
-    });
-
-    // --- 4. HLAVNÍ KOMPONENTY ---
-    const TurnoutDisplay = ({ label, totalVotes, eligibleVoters, colorHex }) => {
-      const turnout = ((totalVotes / eligibleVoters) * 100).toFixed(2);
-      return (
-        <div className="p-5 bg-gray-100 rounded-xl shadow-lg border-l-4 border-opacity-70 text-gray-800" style={{ borderColor: colorHex }}>
-          <p className="text-xl font-bold" style={{ color: colorHex }}>{label}</p>
-          <p className="text-4xl font-extrabold text-gray-900">{turnout}%</p>
-          <p className="text-sm text-gray-600">{totalVotes} z {eligibleVoters} oprávněných voličů</p>
-        </div>
-      );
-    };
-
-    const VizToggleButtons = ({ scenario, dataType, currentView }) => {
-      const buttons = [
-        { type: 'bar', label: 'Sloupce' },
-        { type: 'pie', label: 'Koláč' },
-      ];
-      if (dataType === 'mandate') buttons.push({ type: 'seatmap', label: 'Křesla' });
-      return (
-        <div className="flex items-center space-x-3 flex-wrap gap-y-2">
-          <span className="font-extrabold text-indigo-600 whitespace-nowrap">{dataType === 'percent' ? 'Hlasy:' : 'Mandáty:'}</span>
-          <div className="flex space-x-2 p-1 bg-gray-200 rounded-xl shadow-inner">
-            {buttons.map(btn => (
-              <button key={btn.type} onClick={() => handleToggle(scenario, dataType, btn.type)} className={`px-4 py-2 text-sm font-bold rounded-lg transition duration-200 ease-in-out cursor-pointer text-center min-w-[80px] ${currentView === btn.type ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400 scale-105' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>
-                {btn.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    };
-
-    const ResultsTable = ({ results, accentColor }) => {
-      const [isCollapsed, setIsCollapsed] = useState(true);
-      const sortedResults = useMemo(() => {
-        return [...results].sort((a, b) => (b.mandates !== a.mandates) ? (b.mandates - a.mandates) : (b.percentage - a.percentage));
-      }, [results]);
-      const totalMandatesAssigned = results.reduce((sum, p) => sum + p.mandates, 0);
-      const buttonColor = PARTY_COLORS[accentColor] || '#4F46E5';
-      return (
-        <div className="mt-10">
-          <button onClick={() => setIsCollapsed(!isCollapsed)} className="flex items-center justify-between w-full p-4 text-xl font-extrabold text-white rounded-lg shadow-lg transition duration-200" style={{ backgroundColor: buttonColor }}>
-            Přehled výsledků (Mandáty: {totalMandatesAssigned}/{TOTAL_MANDATES})
-            <span className="ml-2">{isCollapsed ? '▼' : '▲'}</span>
-          </button>
-          <div className={`overflow-hidden transition-[max-height] duration-500 ease-in-out ${isCollapsed ? 'max-h-0' : 'max-h-screen mt-4'}`}>
-            <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-md">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Strana</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Podíl (%)</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Mandáty</th></tr></thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {sortedResults.map(p => (
-                    <tr key={p.party} className={`hover:bg-gray-50 transition ${!p.isQualified ? 'opacity-70' : ''}`}>
-                      <td className="px-4 py-3 whitespace-nowrap text-md font-medium text-gray-800 flex items-center"><span className="w-3 h-3 rounded-full mr-2 shadow-sm" style={{ backgroundColor: p.color }}></span>{p.party}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.votes}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.percentage.toFixed(2)}% {!p.isQualified && <span className="ml-2 text-xs text-red-500 font-semibold">(Prop)</span>}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-lg text-center font-extrabold" style={{ color: buttonColor }}>{p.mandates}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    const App = () => {
-      const [s1View, setS1View] = useState({ percent: 'bar', mandate: 'bar' });
-      const [s2View, setS2View] = useState({ percent: 'bar', mandate: 'bar' });
-      const [isModalOpen, setIsModalOpen] = useState(false);
-
-      const studentVotes = useMemo(() => rawData.map(p => ({ party: p.party, votes: p.students })), []);
-      const combinedVotes = useMemo(() => rawData.map(p => ({ party: p.party, votes: p.students + p.teachers })), []);
-
-      const s1 = useMemo(() => calculateScenario(studentVotes, TOTAL_STUDENT_VOTES, TOTAL_ELIGIBLE_STUDENTS), [studentVotes]);
-      const s2 = useMemo(() => calculateScenario(combinedVotes, TOTAL_STUDENT_VOTES + TOTAL_TEACHER_VOTES, TOTAL_ELIGIBLE_STUDENTS + TOTAL_ELIGIBLE_TEACHERS), [combinedVotes]);
-
-      const dhondtSteps = useMemo(() => getDHondtSteps(rawData, TOTAL_MANDATES, VOTE_MULTIPLIER, THRESHOLD_PERCENT), []);
-
-      const handleToggle = (scenario, dataType, viewType) => {
-        if (scenario === 's1') setS1View(prev => ({ ...prev, [dataType]: viewType }));
-        else setS2View(prev => ({ ...prev, [dataType]: viewType }));
-      };
-
-      const ScenarioCard = ({ scenario, accentColor, title, totalVotes, results }) => {
-        const currentView = scenario === 's1' ? s1View : s2View;
-        const sId = scenario === 's1' ? 's1' : 's2';
-        const isMandate = (dataKey) => dataKey === 'mandates';
-        return (
-          <div className="mb-12 p-8 bg-white rounded-xl shadow-2xl border-t-4 border-b-4 border-gray-200">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b pb-3 border-gray-200">
-              <h2 className="text-3xl font-extrabold text-gray-900">{title}</h2>
-              <button onClick={() => setIsModalOpen(true)} className="px-5 py-2 bg-indigo-600 text-white rounded-full text-md font-bold hover:bg-indigo-700 transition shadow-lg">Vysvětlení Vzorce</button>
-            </div>
-            <p className="mb-6 text-sm text-gray-600">Celkem platných hlasů: <span className="font-bold text-gray-800">{totalVotes}</span></p>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 p-4 bg-gray-100 rounded-xl border border-gray-200">
-              <VizToggleButtons scenario={sId} dataType="percent" currentView={currentView.percent} />
-              <VizToggleButtons scenario={sId} dataType="mandate" currentView={currentView.mandate} />
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-              <div>
-                <h3 className="font-extrabold text-xl mb-3 text-gray-800">Procentuální Podíl</h3>
-                {currentView.percent === 'bar' && <ChartRenderer type="bar" data={results} dataKey="percentage" isMandate={isMandate('percentage')} />}
-                {currentView.percent === 'pie' && <ChartRenderer type="pie" data={results} dataKey="percentage" isMandate={isMandate('percentage')} />}
-              </div>
-              <div>
-                <h3 className="font-extrabold text-xl mb-3 text-gray-800">Rozdělení Mandátů</h3>
-                {currentView.mandate === 'bar' && <ChartRenderer type="bar" data={results} dataKey="mandates" isMandate={isMandate('mandates')} />}
-                {currentView.mandate === 'pie' && <ChartRenderer type="pie" data={results} dataKey="mandates" isMandate={isMandate('mandates')} />}
-                {currentView.mandate === 'seatmap' && <SeatMapCanvas results={results} />}
-              </div>
-            </div>
-            <ResultsTable results={results} accentColor={accentColor} />
-          </div>
-        );
-      };
-
-      return (
-        <div className="p-4 sm:p-8 min-h-screen font-sans bg-gray-50 text-gray-900">
-          <div className="max-w-6xl mx-auto bg-white shadow-2xl rounded-2xl p-6 sm:p-10 border border-gray-200">
-            <h1 className="text-4xl sm:text-5xl font-extrabold text-indigo-700 mb-2">📊 Analýza Školních Voleb</h1>
-            <p className="text-gray-600 mb-8 pb-4 border-b border-indigo-200 text-lg">Simulace rozdělení <strong>{TOTAL_MANDATES} mandátů</strong> pomocí D'Hondtovy metody a s <strong>5%</strong> volební klauzulí.</p>
-            <div className="mb-12 p-6 bg-gray-100 rounded-xl border border-gray-200 shadow-md">
-              <h2 className="text-2xl font-bold text-indigo-700 mb-4">1. Původní Hlasy a Volební Účast</h2>
-              <div className="overflow-x-auto mb-8">
-                <table className="min-w-full divide-y divide-gray-300 rounded-lg overflow-hidden">
-                  <thead className="bg-gray-200"><tr><th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Strana</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy Žáků</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy Učitelů</th><th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Hlasy CELKEM</th></tr></thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {rawData.map(p => (
-                      <tr key={p.party} className="hover:bg-gray-50 transition">
-                        <td className="px-4 py-3 whitespace-nowrap text-md font-medium text-gray-800">{p.party}</td>
-                        <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.students}</td>
-                        <td className="px-4 py-3 whitespace-nowrap text-md text-center text-gray-700">{p.teachers}</td>
-                        <td className="px-4 py-3 whitespace-nowrap text-md text-center font-extrabold text-indigo-600">{p.students + p.teachers}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-200/80 font-extrabold border-t-2 border-indigo-500"><tr><td className="px-4 py-3 whitespace-nowrap text-md text-indigo-700">HLASY CELKEM:</td><td className="px-4 py-3 whitespace-nowrap text-md text-center text-indigo-700">{TOTAL_STUDENT_VOTES}</td><td className="px-4 py-3 whitespace-nowrap text-md text-center text-indigo-700">{TOTAL_TEACHER_VOTES}</td><td className="px-4 py-3 whitespace-nowrap text-md text-center text-indigo-700">{TOTAL_STUDENT_VOTES + TOTAL_TEACHER_VOTES}</td></tr></tfoot>
-                </table>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-center">
-                <TurnoutDisplay label="Účast Studentů" totalVotes={TOTAL_STUDENT_VOTES} eligibleVoters={TOTAL_ELIGIBLE_STUDENTS} colorHex="#D946EF" />
-                <TurnoutDisplay label="Celková Účast" totalVotes={TOTAL_STUDENT_VOTES + TOTAL_TEACHER_VOTES} eligibleVoters={TOTAL_ELIGIBLE_STUDENTS + TOTAL_ELIGIBLE_TEACHERS} colorHex="#10B981" />
-              </div>
-            </div>
-            <ScenarioCard scenario="s1" title="2. Scénář A: Hlasovali Jen Studenti" accentColor="Spolu" totalVotes={s1.totalVotes} results={s1.results} />
-            <ScenarioCard scenario="s2" title="3. Scénář B: Hlasovali Studenti i Učitelé" accentColor="STAN" totalVotes={s2.totalVotes} results={s2.results} />
-          </div>
-          {/* MODÁL */}
-          <div className={`fixed inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center z-50 transition-opacity duration-300 ${isModalOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-            <div className={`bg-white text-gray-900 rounded-xl shadow-2xl max-w-4xl w-11/12 p-6 sm:p-8 transition-transform duration-300 ${isModalOpen ? 'scale-100' : 'scale-95'} border border-indigo-500/50`}>
-              <h3 className="text-3xl font-bold text-indigo-700 mb-4 border-b border-gray-200 pb-2">Jak se přepočítávají hlasy na mandáty</h3>
-              <div className="text-gray-700 space-y-4 max-h-[70vh] overflow-y-auto pr-3">
-                <h4 className="font-semibold text-xl text-fuchsia-600">1. D'Hondtova metoda (poměrné zastoupení)</h4>
-                <p>Tato metoda se používá k tomu, aby se křesla (mandáty) rozdělily co nejspravedlivěji podle počtu získaných hlasů. Zároveň mírně zvýhodňuje silnější strany.</p>
-                <p className="font-semibold text-gray-800">Jak se počítá kvocient:</p>
-                <div className="bg-gray-100 p-4 rounded-lg border border-indigo-200 text-center">
-                  <p className="font-mono text-lg font-bold text-indigo-700">Kvócients = Hlasy strany / (Počet získaných mandátů + 1)</p>
-                </div>
-                <ul className="list-disc list-inside text-base pl-4 space-y-1">
-                  <li>Mandáty se rozdělují postupně, dokud se jich nerozdá všech <strong>{TOTAL_MANDATES}</strong>.</li>
-                  <li>V každém kroku získá mandát ta strana, která má po dělení <strong>nejvyšší kvocient</strong>.</li>
-                </ul>
-                <h4 className="font-semibold text-xl text-emerald-600">2. Volební klauzule (5 %)</h4>
-                <p>Aby strana mohla získat jakýkoliv mandát, musí v celkovém součtu platných hlasů získat <strong>alespoň 5 % hlasů</strong>. Hlasy stran, které tuto hranici nepřekročí, propadají (nepočítají se do dělení mandátů).</p>
-                <h4 className="font-semibold text-xl text-gray-700">3. Škálování dat pro simulaci</h4>
-                <p>Protože se jedná o studentské volby s malým počtem hlasů, ale simulujeme rozdělení {TOTAL_MANDATES} mandátů (jako ve skutečných parlamentních volbách), vynásobili jsme pro přesnější výpočet D'Hondtovy metody všechny hlasy číslem <strong>{VOTE_MULTIPLIER}</strong>. Poměry mezi hlasy jednotlivých stran zůstávají stejné.</p>
-                <div className="pt-6">
-                  <h4 className="font-extrabold text-2xl text-indigo-700 border-t pt-4 mt-6 border-indigo-300">4. Krok za krokem: Simulace D'Hondtovy metody</h4>
-                  <p className="mb-4 text-sm text-gray-600">Níže vidíte, jak se rozdělují první a poslední mandáty (použita data ze Scénáře B: Žáci + Učitelé).</p>
-                  <DHondtStepTable steps={dhondtSteps} />
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button onClick={() => setIsModalOpen(false)} className="px-6 py-2 bg-gray-400 text-gray-900 rounded-lg font-bold hover:bg-gray-500 transition shadow-md">Zavřít vysvětlení</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(<App />);
-    }); // end window.load listener
-  </script>
+ReactDOM.createRoot(document.getElementById('app')).render(React.createElement(App));
+</script>
 </body>
 </html>
