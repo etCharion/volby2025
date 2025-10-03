@@ -5,54 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Analýza Školních Voleb 2025</title>
 
-  <!-- Tailwind (dev varování ignoruj, pro lokální test je to ok) -->
   <script src="https://cdn.tailwindcss.com"></script>
-
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
     body { font-family: 'Inter', sans-serif; background-color: #f7f7f7; }
   </style>
 
-  <!-- React (production UMD) + ReactDOM -->
+  <!-- React + ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 
-  <!-- PropTypes pro Recharts UMD (řeší "oneOfType" chybu) -->
+  <!-- PropTypes (fix pro Recharts UMD) -->
   <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" crossorigin></script>
 
-  <!-- Recharts (UMD) + fallback na unpkg při chybě načtení -->
+  <!-- Recharts + fallback -->
   <script
     src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"
     crossorigin
-    onerror="
-      (function(){
-        var s=document.createElement('script');
-        s.src='https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js';
-        s.crossOrigin='anonymous';
-        document.head.appendChild(s);
-      })();
-    "
+    onerror="(function(){var s=document.createElement('script');s.src='https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);})();"
   ></script>
 
-  <!-- Babel (jen pro tohle HTML s inline JSX) -->
+  <!-- Babel (pro inline JSX) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
   <div id="root" class="p-4 md:p-8"></div>
 
-  <!-- Tvůj kód: spustí se až po window.load, takže CDN mají čas se natáhnout -->
   <script type="text/babel">
     window.addEventListener('load', () => {
       const { useState, useMemo } = React;
-
-      // Bezpečné získání Recharts z globálu + srozumitelná chyba
       const R = window.Recharts;
-      if (!R) {
-        throw new Error('Recharts CDN se nenačetl. Zkontroluj internet / firemní proxy / Content Security Policy.');
-      }
+      if (!R) throw new Error('Recharts CDN se nenačetl.');
       const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = R;
 
-      // --- DATA (ponecháno) ---
+      // --- DATA ---
       const initialData = [
         { name: 'Spolu', p13: 26, p4: 3, student: 29, teacher: 4, total: 33 },
         { name: 'SPD', p13: 1, p4: 0, student: 1, teacher: 0, total: 1 },
@@ -80,18 +66,16 @@
         'SMS':'#CDDC39','Přísaha':'#FFC107','Voluntia':'#009688',
       };
 
-      // --- D'Hondt ---
+      // --- D'HONDT ---
       const calculateMandates = (data, totalVotes, totalMandates = 200, voteKey) => {
         const threshold = totalVotes * 0.05;
         const qualifying = data.filter(p => p[voteKey] >= threshold);
 
         if (!qualifying.length) {
           return data.map(p => ({
-            ...p,
-            votes: p[voteKey],
+            ...p, votes: p[voteKey],
             percent: totalVotes ? (p[voteKey]/totalVotes)*100 : 0,
-            mandates: 0,
-            qualified: false,
+            mandates: 0, qualified: false,
             color: PARTY_COLORS[p.name] || '#9CA3AF'
           }));
         }
@@ -122,6 +106,36 @@
         return final;
       };
 
+      // --- Pomocné pro modal: první N kroků dělení ---
+      const dhondtFirstSteps = (data, voteKey, steps, totalVotes) => {
+        const threshold = totalVotes * 0.05;
+        const qualifying = data.filter(p => p[voteKey] >= threshold)
+          .map(p => ({ name: p.name, votes: p[voteKey], mandates: 0 }));
+        const out = [];
+        if (!qualifying.length) return { qualifying: [], steps: [] };
+
+        for (let i=1;i<=steps;i++){
+          // aktuální kvocienty
+          let winner = null, bestQ = -1;
+          for (const p of qualifying){
+            const q = p.votes / (p.mandates + 1);
+            if (q > bestQ){ bestQ = q; winner = p; }
+          }
+          if (!winner) break;
+          // zapiš krok
+          out.push({
+            step: i,
+            party: winner.name,
+            divisor: winner.mandates + 1,
+            quotient: bestQ,
+            mandatesAfter: winner.mandates + 1
+          });
+          // přidelej mandát vítězi a pokračuj
+          winner.mandates += 1;
+        }
+        return { qualifying: qualifying.map(p=>({name:p.name, votes:p.votes})), steps: out };
+      };
+
       // --- UI ---
       const Loader = () => (
         <div className="flex justify-center items-center py-8">
@@ -132,42 +146,52 @@
 
       const PieChartView = ({ data, totalVotes }) => {
         const chartData = data.filter(p=>p.votes>0).map(p=>({
-          name:p.name, label:`${p.name} (${p.percent.toFixed(1)}%)`, value:p.votes, color:p.color
+          name:p.name, value:p.votes, color:p.color, percent:p.percent
         }));
         return (
           <div className="flex flex-col items-center">
-            <h3 className="text-xl font-semibold mb-4">Koláčový graf hlasů (Volební podíl)</h3>
+            <h3 className="text-xl font-semibold mb-4">Koláčový graf hlasů</h3>
             <ResponsiveContainer width="100%" height={400}>
               <PieChart>
-                <Pie data={chartData} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={150} labelLine={false}
-                     label={({label,percent})=>`${label} - ${(percent*100).toFixed(1)}%`}>
+                <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={150} labelLine={false}
+                     label={({name})=>name}>
                   {chartData.map((e,i)=><Cell key={i} fill={e.color}/>)}
                 </Pie>
-                <Tooltip formatter={(value,_n,{payload})=>[`${value} hlasů`, payload.name]} />
+                <Tooltip formatter={(value,_n,{payload})=>[
+                  `${value} hlasů (${payload.percent.toFixed(2)} %)`, payload.name
+                ]}/>
                 <Legend layout="horizontal" verticalAlign="bottom" align="center" />
               </PieChart>
             </ResponsiveContainer>
             <p className="text-sm text-gray-600 mt-2">
-              Celkem platných hlasů v tomto režimu: <strong>{totalVotes}</strong>.
+              Celkem platných hlasů: <strong>{totalVotes}</strong>.
             </p>
           </div>
         );
       };
 
       const BarChartView = ({ data }) => {
-        const chartData = data.map(p=>({name:p.name, Hlasy:p.votes, Mandáty:p.mandates, color:p.color}));
+        const chartData = data.map(p => ({
+          name: p.name, Hlasy: p.votes, Mandáty: p.mandates, color: p.color
+        }));
         return (
           <div className="flex flex-col items-center">
             <h3 className="text-xl font-semibold mb-4">Sloupcový graf hlasů a mandátů</h3>
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={chartData} margin={{ top:20, right:30, left:20, bottom:5 }}>
+            <ResponsiveContainer width="100%" height={420}>
+              <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} />
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="Hlasy" name="Počet hlasů" />
-                <Bar dataKey="Mandáty" name="Počet mandátů (200)" />
+                {/* Každý sloupec Hlasy obarvíme dle strany */}
+                <Bar dataKey="Hlasy" name="Počet hlasů">
+                  {chartData.map((entry, index) => (
+                    <Cell key={`h-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+                {/* Mandáty: jemnější šedá, aby nepřebíjely „hlasy“ */}
+                <Bar dataKey="Mandáty" name="Počet mandátů" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -177,10 +201,10 @@
       const MandateDotPlot = ({ data }) => {
         const mandatedData = data.filter(p=>p.mandates>0);
         const totalMandates = mandatedData.reduce((s,p)=>s+p.mandates,0);
-        if (!totalMandates) return <p className="text-center py-8 text-lg text-red-600">Žádná strana nepřekročila 5% kvórum a nezískala mandáty.</p>;
+        if (!totalMandates) return <p className="text-center py-8 text-lg text-red-600">Žádná strana nepřekročila kvórum a nezískala mandáty.</p>;
         return (
           <div className="flex flex-col items-center">
-            <h3 className="text-xl font-semibold mb-4">Rozdělení 200 mandátů (Tečkový graf)</h3>
+            <h3 className="text-xl font-semibold mb-4">Rozdělení mandátů</h3>
             <div className="w-full max-w-4xl p-4 bg-white rounded-lg shadow-lg">
               <div className="grid grid-cols-10 gap-2 mb-4">
                 {mandatedData.map(p=>(
@@ -211,9 +235,9 @@
                   <tr>
                     <th className="px-6 py-3 text-left  text-xs font-medium text-gray-500 uppercase tracking-wider">Strana</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Hlasy</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Podíl (%)</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Podíl %</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">5% Klauzule</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Mandáty (200)</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Mandáty</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -221,7 +245,7 @@
                     <tr key={i} className={p.qualified?'hover:bg-green-50':'hover:bg-red-50'}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{color:p.color}}>{p.name}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right">{p.votes}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">{p.percent.toFixed(2)} %</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">{p.percent.toFixed(2)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${p.qualified?'bg-green-100 text-green-800':'bg-red-100 text-red-800'}`}>
                           {p.qualified?'Postupuje':'Eliminována'}
@@ -233,7 +257,7 @@
                   <tr>
                     <td className="px-6 py-4 font-bold">CELKEM</td>
                     <td className="px-6 py-4 font-bold text-right">{totalVotes}</td>
-                    <td className="px-6 py-4 font-bold text-right">100.00 %</td>
+                    <td className="px-6 py-4 font-bold text-right">100.00</td>
                     <td className="px-6 py-4 font-bold text-right">Kvórum: {threshold.toFixed(2)}</td>
                     <td className="px-6 py-4 font-bold text-right">{mandatesSum}</td>
                   </tr>
@@ -244,59 +268,86 @@
         );
       };
 
-      const ExplanationModal = ({ onClose, mode, totalVotes, threshold, exampleParty }) => {
+      const ExplanationModal = ({ onClose, mode, totalVotes, threshold, exampleParty, data }) => {
         if (!exampleParty) return null;
         const voteKey = mode==='student' ? 'student' : 'total';
-        const exampleVotes = exampleParty[voteKey];
+        const { qualifying, steps } = dhondtFirstSteps(data, voteKey, 10, totalVotes);
+
         return (
           <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full p-6 md:p-10 relative max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full p-6 md:p-10 relative max-h-[90vh] overflow-y-auto">
               <button onClick={onClose} className="absolute top-4 right-4 text-gray-600 hover:text-gray-900 text-2xl font-bold" aria-label="Zavřít vysvětlení">&times;</button>
-              <h2 className="text-2xl font-extrabold mb-4 text-blue-700">Vysvětlení přepočtu mandátů (D'Hondt)</h2>
-              <p className="text-gray-700 mb-6">ČR používá <strong>D'Hondtovu metodu</strong> a <strong>5% klauzuli</strong>. Rozděluje se <strong>200</strong> mandátů.</p>
-              <h3 className="text-xl font-bold mt-4 mb-2">1. Volební kvórum (5 %)</h3>
-              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 mb-4">
-                <p className="font-mono text-sm">Celkem platných hlasů: <strong>{totalVotes}</strong></p>
-                <p className="font-mono text-sm">5% klauzule (limit): <strong>{threshold.toFixed(2)} hlasů</strong></p>
+              <h2 className="text-2xl font-extrabold mb-4 text-blue-700">Jak se přepočítávají hlasy na mandáty – D'Hondt</h2>
+
+              <div className="grid md:grid-cols-2 gap-4 mb-6">
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                  <p className="font-mono text-sm">Platné hlasy: <strong>{totalVotes}</strong></p>
+                  <p className="font-mono text-sm">Limit 5 %: <strong>{threshold.toFixed(2)} hlasů</strong></p>
+                </div>
+                <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+                  <p className="font-semibold mb-1">Postupující strany</p>
+                  {qualifying.length
+                    ? <ul className="list-disc pl-5 text-sm">
+                        {qualifying.map(q=>(
+                          <li key={q.name}><span className="font-medium">{q.name}</span>: {q.votes} hlasů</li>
+                        ))}
+                      </ul>
+                    : <p className="text-sm">Žádná strana nepřekročila 5 %</p>}
+                </div>
               </div>
-              <h3 className="text-xl font-bold mt-2 mb-2">2. Rozdělení mandátů (D'Hondt)</h3>
-              <p className="mb-3"><em>Kvocient</em> = (Počet hlasů strany) / (Počet již získaných mandátů + 1). Vždy získá mandát strana s nejvyšším aktuálním kvocientem, dokud nepřidělíme 200 mandátů.</p>
-              <div className="overflow-x-auto mb-2">
+
+              <h3 className="text-xl font-bold mt-2 mb-2">Princip metody</h3>
+              <ol className="list-decimal pl-6 space-y-1 text-sm">
+                <li>Do dělení jdou jen strany nad 5 % platných hlasů.</li>
+                <li>Pro každou postupující stranu se počítají <em>kvocienty</em>: hlasy / (už přidělené mandáty + 1).</li>
+                <li>V každém kroku získá mandát strana s nejvyšším aktuálním kvocientem.</li>
+                <li>Po přidělení mandátu se dané straně zvýší dělitel o 1 a přepočítá se její kvocient.</li>
+                <li>Pokračuje se, dokud není rozděleno 200 mandátů.</li>
+              </ol>
+
+              <h3 className="text-xl font-bold mt-6 mb-2">Prvních 10 kroků přidělování</h3>
+              <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 border border-gray-300">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dělitel</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">1</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">2</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">3</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">4</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Krok</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Strana</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Dělitel</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Kvocient</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Mandátů po kroku</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    <tr>
-                      <td className="px-4 py-2 whitespace-nowrap font-medium text-gray-900">{exampleParty.name}</td>
-                      <td className="px-4 py-2 whitespace-nowrap text-right">{exampleVotes} / 1 = <strong>{exampleVotes}</strong></td>
-                      <td className="px-4 py-2 whitespace-nowrap text-right">{exampleVotes} / 2 = <strong>{(exampleVotes/2).toFixed(1)}</strong></td>
-                      <td className="px-4 py-2 whitespace-nowrap text-right">{exampleVotes} / 3 = <strong>{(exampleVotes/3).toFixed(1)}</strong></td>
-                      <td className="px-4 py-2 whitespace-nowrap text-right">{exampleVotes} / 4 = <strong>{(exampleVotes/4).toFixed(1)}</strong></td>
-                    </tr>
+                    {steps.map(row=>(
+                      <tr key={row.step}>
+                        <td className="px-4 py-2 text-sm">{row.step}</td>
+                        <td className="px-4 py-2 text-sm">{row.party}</td>
+                        <td className="px-4 py-2 text-sm text-right">{row.divisor}</td>
+                        <td className="px-4 py-2 text-sm text-right">{row.quotient.toFixed(3)}</td>
+                        <td className="px-4 py-2 text-sm text-right">{row.mandatesAfter}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-              <p className="text-sm text-gray-500 mt-2">V praxi hledáme 200 nejvyšších kvocientů napříč všemi stranami.</p>
+
+              <p className="text-sm text-gray-600 mt-4">
+                Pozn.: uvedená tabulka je demonstrační. Finální rozdělení vzniká po 200 krocích téhož postupu.
+              </p>
             </div>
           </div>
         );
       };
 
+      // --- APP ---
       const App = () => {
-        const [mode, setMode] = useState('student');
-        const [view, setView] = useState('pie');
+        const [mode, setMode] = useState('student');   // 'student' | 'total'
+        const [view, setView] = useState('pie');       // 'pie' | 'bar' | 'mandates' | 'table'
         const [showExplanation, setShowExplanation] = useState(false);
 
         const voteKey = mode==='student' ? 'student' : 'total';
         const totalVotes = votesCast[voteKey];
-        const electorate = (voteKey==='student')?totalElectorate.student:totalElectorate.total;
+        const electorate = (voteKey==='student') ? totalElectorate.student : totalElectorate.total;
 
         const results = useMemo(()=>calculateMandates(initialData, totalVotes, 200, voteKey), [mode, totalVotes]);
         const turnout = electorate ? (votesCast[voteKey]/electorate)*100 : 0;
@@ -307,12 +358,12 @@
 
         const getTurnoutInfo = () => mode==='student'
           ? (<div className="text-sm">
-              <p>Celkový počet hlasujících studentů: <strong>{votesCast.student}</strong> / {totalElectorate.student} voličů.</p>
+              <p>Hlasujících studentů: <strong>{votesCast.student}</strong> / {totalElectorate.student}</p>
               <p className="font-semibold text-blue-600">Účast: {turnout.toFixed(2)} %</p>
-              <p className="mt-2 italic text-gray-700">Z toho: <strong>{p4Votes}</strong> hlasů tvoří „korespondenční volba ze zahraničí“ (čtvrťáci).</p>
+              <p className="mt-2 italic text-gray-700">Z toho <strong>{p4Votes}</strong> hlasů čtvrťáků v režimu „ze zahraničí“.</p>
             </div>)
           : (<div className="text-sm">
-              <p>Celkový počet hlasujících (studenti + učitelé): <strong>{votesCast.total}</strong> / {totalElectorate.total} voličů.</p>
+              <p>Hlasujících celkem: <strong>{votesCast.total}</strong> / {totalElectorate.total}</p>
               <p className="font-semibold text-blue-600">Účast: {turnout.toFixed(2)} %</p>
             </div>);
 
@@ -332,11 +383,11 @@
         return (
           <div className="bg-white shadow-xl rounded-2xl p-4 md:p-8">
             <h1 className="text-3xl md:text-4xl font-extrabold text-gray-800 mb-6 border-b pb-3">Školní Volební Analýza</h1>
-            <p className="text-lg text-gray-600 mb-6">Interaktivní vizualizace a přepočet mandátů (D'Hondt, 5% kvórum, 200 mandátů).</p>
+            <p className="text-lg text-gray-600 mb-6">Interaktivní vizualizace a přepočet mandátů podle pravidel pro Poslaneckou sněmovnu.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
               <div className="p-4 bg-gray-100 rounded-lg shadow-inner col-span-1 md:col-span-2">
-                <h2 className="text-xl font-bold mb-3">Režim Hlasování</h2>
+                <h2 className="text-xl font-bold mb-3">Režim hlasování</h2>
                 <div className="flex flex-wrap gap-3">
                   <button onClick={()=>setMode('student')}
                           className={`px-6 py-2 rounded-full font-semibold transition ${mode==='student'?'bg-blue-600 text-white hover:bg-blue-700':'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'}`}>
@@ -344,7 +395,7 @@
                   </button>
                   <button onClick={()=>setMode('total')}
                           className={`px-6 py-2 rounded-full font-semibold transition ${mode==='total'?'bg-blue-600 text-white hover:bg-blue-700':'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'}`}>
-                    Studenti + Učitelé (Celkem)
+                    Studenti + Učitelé
                   </button>
                 </div>
               </div>
@@ -355,20 +406,29 @@
             </div>
 
             <div className="mb-8 border-t pt-4">
-              <h2 className="text-xl font-bold mb-3">Zobrazení Výsledků</h2>
+              <h2 className="text-xl font-bold mb-3">Zobrazení výsledků</h2>
               <div className="flex flex-wrap gap-3">
-                <button onClick={()=>setView('pie')}      className={`px-4 py-2 rounded-lg font-medium transition ${view==='pie'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Koláč (Hlasy) &amp; Tečky (Mandáty)</button>
+                <button onClick={()=>setView('pie')}      className={`px-4 py-2 rounded-lg font-medium transition ${view==='pie'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Koláčový graf</button>
                 <button onClick={()=>setView('bar')}      className={`px-4 py-2 rounded-lg font-medium transition ${view==='bar'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Sloupcový graf</button>
                 <button onClick={()=>setView('table')}    className={`px-4 py-2 rounded-lg font-medium transition ${view==='table'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Tabulka</button>
                 <button onClick={()=>setView('mandates')} className={`px-4 py-2 rounded-lg font-medium transition ${view==='mandates'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Tečkový graf mandátů</button>
-                <button onClick={()=>setShowExplanation(true)} className="px-4 py-2 rounded-lg font-medium transition bg-purple-500 text-white hover:bg-purple-600 shadow-md">Vysvětlení D'Hondtovy metody</button>
+                <button onClick={()=>setShowExplanation(true)} className="px-4 py-2 rounded-lg font-medium transition bg-purple-500 text-white hover:bg-purple-600 shadow-md">Vysvětlení přepočtu</button>
               </div>
             </div>
 
-            <div className="min-h-[500px] border-t pt-8">{renderVisualization()}</div>
+            <div className="min-h-[500px] border-t pt-8">
+              {renderVisualization()}
+            </div>
 
             {showExplanation && (
-              <ExplanationModal onClose={()=>setShowExplanation(false)} mode={mode} totalVotes={totalVotes} threshold={threshold} exampleParty={exampleParty}/>
+              <ExplanationModal
+                onClose={()=>setShowExplanation(false)}
+                mode={mode}
+                totalVotes={totalVotes}
+                threshold={threshold}
+                exampleParty={exampleParty}
+                data={initialData}
+              />
             )}
           </div>
         );
