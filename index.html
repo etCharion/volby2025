@@ -211,8 +211,8 @@
         );
       };
 
-      // === FLEXIBILNÍ MŘÍŽKA S KONSTANTNÍMI KOSTIČKAMI (default 0.5 mm) ===
-      function SeatGrid({ tiles, caption, legend, seatMm = 0.5, gapPx = 2 }) {
+      // === FLEXIBILNÍ MŘÍŽKA S KONSTANTNÍMI KOSTIČKAMI (default 5 mm) ===
+      function SeatGrid({ tiles, caption, legend, seatMm = 5, gapPx = 2 }) {
         // doplníme do 200
         const filled = [...tiles];
         while (filled.length < 200) filled.push({ name: '—', color: '#E5E7EB', empty: true });
@@ -266,7 +266,7 @@
         const ordered = data.filter(p=>p.mandates>0).sort((a,b)=> b.mandates - a.mandates || b.votes - a.votes);
         const tiles = ordered.flatMap(p => Array.from({length:p.mandates}).map(()=>({name:p.name, color:p.color})));
         const legend = ordered.map(p => ({name:p.name, color:p.color, mandates:p.mandates}));
-        return <SeatGrid tiles={tiles} caption="Rozdělení mandátů" legend={legend} seatMm={0.5} />;
+        return <SeatGrid tiles={tiles} caption="Rozdělení mandátů" legend={legend} seatMm={5} />;
       };
 
       function ResultsTable({ data, totalVotes, threshold }) {
@@ -437,7 +437,7 @@
               tiles={tilesSel}
               caption="Koaliční mandáty"
               legend={selectedList.map(p=>({name:p.name, color:p.color, mandates:p.mandates}))}
-              seatMm={0.5}
+              seatMm={5}
             />
           </div>
         );
