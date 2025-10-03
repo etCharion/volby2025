@@ -21,7 +21,10 @@
     <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
 </head>
 <body>
-    <div id="root" class="p-4 md:p-8"></div>
+    <div id="root" class="p-4 md:p-8">
+        <!-- Tato zpráva se zobrazí, pokud React selže. Pokud ji vidíte, problém je v Babelu nebo v kódu Reactu. -->
+        <p class="text-center text-xl text-gray-500 py-10" id="loading-message">Načítání aplikace pro analýzu voleb...</p>
+    </div>
 
     <script type="text/babel">
         const { useState, useMemo } = React;
@@ -434,7 +437,10 @@
             // Volební účast
             const turnout = (votesCast[voteKey] / totalElectorate[voteKey]) * 100;
             const threshold = totalVotes * 0.05;
-            const exampleParty = results.find(p => p.mandates > 0) || results[0]; // Použít nejúspěšnější stranu jako příklad
+            
+            // Použít nejúspěšnější stranu jako příklad, nebo první stranu, pokud nikdo nezískal mandát
+            const exampleParty = results.find(p => p.mandates > 0) || results[0]; 
+
 
             const getTurnoutInfo = () => {
                 if (mode === 'student') {
@@ -569,8 +575,27 @@
         };
 
         // Renderování aplikace do DOM
-        const rootElement = document.getElementById('root');
-        ReactDOM.createRoot(rootElement).render(<App />);
+        try {
+            const rootElement = document.getElementById('root');
+            const loadingMessage = document.getElementById('loading-message');
+            // Skrýt zprávu o načítání
+            if (loadingMessage) {
+                loadingMessage.style.display = 'none';
+            }
+            ReactDOM.createRoot(rootElement).render(<App />);
+        } catch (error) {
+            // Zobrazení chyby v konzoli
+            console.error("Chyba při renderování React aplikace:", error);
+            const rootElement = document.getElementById('root');
+            if (rootElement) {
+                rootElement.innerHTML = `
+                    <div class="p-8 bg-red-100 border-l-4 border-red-500 text-red-700 mt-8 rounded-lg shadow-lg">
+                        <h2 class="text-xl font-bold">Chyba při spuštění aplikace!</h2>
+                        <p class="mt-2">Omlouváme se, došlo k neočekávané chybě během vykreslování dat. Zkontrolujte prosím konzoli prohlížeče (F12) pro více detailů o chybě.</p>
+                    </div>
+                `;
+            }
+        }
     </script>
 </body>
 </html>
