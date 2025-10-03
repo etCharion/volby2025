@@ -66,7 +66,6 @@
         'SMS':'#CDDC39','Přísaha':'#FFC107','Voluntia':'#009688',
       };
 
-      // --- utility: barvy ---
       const mixWithWhite = (hex, amount=0.6) => {
         const h = hex.replace('#','');
         const bigint = parseInt(h.length===3 ? h.split('').map(c=>c+c).join('') : h, 16);
@@ -117,7 +116,6 @@
         return final;
       };
 
-      // --- DETAILNÍ UKÁZKA KROKŮ ---
       const dhondtStepsDetailed = (data, voteKey, steps, totalVotes) => {
         const threshold = totalVotes * 0.05;
         const parties = data
@@ -145,7 +143,6 @@
         return { qualifying: parties.map(p=>({name:p.name, votes:p.votes, color:p.color})), timeline };
       };
 
-      // --- UI: Loader ---
       const Loader = () => (
         <div className="flex justify-center items-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-200 border-t-blue-500"></div>
@@ -153,7 +150,6 @@
         </div>
       );
 
-      // --- UI: Koláč ---
       const PieChartView = ({ data, totalVotes }) => {
         const chartData = data.filter(p=>p.votes>0).map(p=>({
           name:p.name, value:p.votes, color:p.color, percent:p.percent
@@ -178,7 +174,6 @@
         );
       };
 
-      // --- UI: Sloupce (hlasy vs mandáty) ---
       const BarChartView = ({ data }) => {
         const chartData = data.map(p => {
           const color = p.color;
@@ -216,29 +211,40 @@
         );
       };
 
-      // --- UI: 20×20 MŘÍŽKA SEDADEL ---
-      function SeatGrid({ tiles, caption, legend }) {
-        // tiles = [{name,color}] max 200; doplníme šedou
+      // === FLEXIBILNÍ MŘÍŽKA S KONSTANTNÍMI KOSTIČKAMI (default 0.5 mm) ===
+      function SeatGrid({ tiles, caption, legend, seatMm = 0.5, gapPx = 2 }) {
+        // doplníme do 200
         const filled = [...tiles];
         while (filled.length < 200) filled.push({ name: '—', color: '#E5E7EB', empty: true });
+
+        const size = `calc(${seatMm}mm)`;
 
         return (
           <div className="w-full">
             {caption && <h3 className="text-xl font-semibold mb-3">{caption}</h3>}
             <div className="bg-white rounded-lg shadow p-3">
-              <div className="grid gap-1" style={{ gridTemplateColumns: 'repeat(20, minmax(0, 1fr))' }}>
+              <div
+                className="flex flex-wrap"
+                style={{ gap: `${gapPx}px` }}
+              >
                 {filled.map((t, i) => {
                   const is101 = i === 100; // 101. (1-based)
                   return (
-                    <div key={i}
-                      className={`aspect-square rounded-md shadow-sm ${is101 ? 'ring-2 ring-yellow-400 ring-offset-1' : ''}`}
+                    <div
+                      key={i}
+                      className={`rounded-[3px] shadow-sm ${is101 ? 'ring-2 ring-yellow-400 ring-offset-1' : ''}`}
                       title={t.empty ? 'neobsazeno' : `${t.name} – mandát ${i+1}`}
-                      style={{ backgroundColor: t.color }}>
-                    </div>
+                      style={{
+                        width: size,
+                        height: size,
+                        backgroundColor: t.color,
+                        flex: '0 0 auto'
+                      }}
+                    />
                   );
                 })}
               </div>
-              <p className="text-xs text-gray-500 mt-2">Zvýrazněno: 101. křeslo.</p>
+              <p className="text-xs text-gray-500 mt-2">Zvýrazněno: 101. křeslo. Počet kostiček na řádku se přizpůsobí šířce okna.</p>
             </div>
 
             {legend && (
@@ -256,15 +262,13 @@
         );
       }
 
-      // --- Mandáty: mřížka 20×20 ---
       const MandatesGridView = ({ data }) => {
         const ordered = data.filter(p=>p.mandates>0).sort((a,b)=> b.mandates - a.mandates || b.votes - a.votes);
         const tiles = ordered.flatMap(p => Array.from({length:p.mandates}).map(()=>({name:p.name, color:p.color})));
         const legend = ordered.map(p => ({name:p.name, color:p.color, mandates:p.mandates}));
-        return <SeatGrid tiles={tiles} caption="Rozdělení mandátů" legend={legend} />;
+        return <SeatGrid tiles={tiles} caption="Rozdělení mandátů" legend={legend} seatMm={0.5} />;
       };
 
-      // --- Tabulka (function declaration kvůli hoistingu) ---
       function ResultsTable({ data, totalVotes, threshold }) {
         const mandatesSum = data.reduce((s,p)=>s+p.mandates,0);
         return (
@@ -309,7 +313,6 @@
         );
       }
 
-      // --- Modal s lepší vizualizací kroků ---
       const ExplanationModal = ({ onClose, mode, totalVotes, threshold, data }) => {
         const voteKey = mode==='student' ? 'student' : 'total';
         const { qualifying, timeline } = dhondtStepsDetailed(data, voteKey, 10, totalVotes);
@@ -378,7 +381,6 @@
         );
       };
 
-      // --- Koaliční stavebnice (20×20 mřížka) ---
       const CoalitionBuilder = ({ parties }) => {
         const eligible = parties.filter(p=>p.mandates>0);
         const [selected, setSelected] = useState(new Set());
@@ -435,15 +437,15 @@
               tiles={tilesSel}
               caption="Koaliční mandáty"
               legend={selectedList.map(p=>({name:p.name, color:p.color, mandates:p.mandates}))}
+              seatMm={0.5}
             />
           </div>
         );
       };
 
-      // --- APP ---
       const App = () => {
-        const [mode, setMode] = useState('student');   // 'student' | 'total'
-        const [view, setView] = useState('pie');       // 'pie' | 'bar' | 'mandates' | 'table' | 'coalition'
+        const [mode, setMode] = useState('student');
+        const [view, setView] = useState('pie');  // 'pie' | 'bar' | 'mandates' | 'table' | 'coalition'
         const [showExplanation, setShowExplanation] = useState(false);
 
         const voteKey = mode==='student' ? 'student' : 'total';
