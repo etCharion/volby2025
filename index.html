@@ -66,14 +66,10 @@
         'SMS':'#CDDC39','Přísaha':'#FFC107','Voluntia':'#009688',
       };
 
-      // --- utility: barvy ---
       const mixWithWhite = (hex, amount=0.6) => {
-        // amount 0..1 (0 => původní barva, 1 => bílá)
         const h = hex.replace('#','');
         const bigint = parseInt(h.length===3 ? h.split('').map(c=>c+c).join('') : h, 16);
-        let r = (bigint >> 16) & 255;
-        let g = (bigint >> 8) & 255;
-        let b = bigint & 255;
+        let r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
         r = Math.round(r*(1-amount) + 255*amount);
         g = Math.round(g*(1-amount) + 255*amount);
         b = Math.round(b*(1-amount) + 255*amount);
@@ -84,7 +80,6 @@
       const calculateMandates = (data, totalVotes, totalMandates = 200, voteKey) => {
         const threshold = totalVotes * 0.05;
         const qualifying = data.filter(p => p[voteKey] >= threshold);
-
         if (!qualifying.length) {
           return data.map(p => ({
             ...p, votes: p[voteKey],
@@ -93,11 +88,9 @@
             color: PARTY_COLORS[p.name] || '#9CA3AF'
           }));
         }
-
         const mandates = Object.create(null);
         const quotients = Object.create(null);
         for (const p of qualifying) { mandates[p.name]=0; quotients[p.name]=p[voteKey]; }
-
         for (let i=0;i<totalMandates;i++){
           let maxName=null, maxQ=-1;
           for (const name in quotients){ const q=quotients[name]; if(q>maxQ){maxQ=q;maxName=name;} }
@@ -106,7 +99,6 @@
           const partyVotes = qualifying.find(p=>p.name===maxName)[voteKey];
           quotients[maxName] = partyVotes / (mandates[maxName] + 1);
         }
-
         const final = data.map(p=>{
           const votes=p[voteKey], percent=totalVotes?(votes/totalVotes)*100:0;
           const qualified = votes>=threshold;
@@ -120,40 +112,7 @@
         return final;
       };
 
-      // --- detailní kroky pro modal (vizuální řádky) ---
-      const dhondtStepsDetailed = (data, voteKey, steps, totalVotes) => {
-        const threshold = totalVotes * 0.05;
-        const parties = data
-          .filter(p => p[voteKey] >= threshold)
-          .map(p => ({ name: p.name, votes: p[voteKey], mandates: 0, color: PARTY_COLORS[p.name] || '#999' }));
-        const timeline = [];
-        if (!parties.length) return { qualifying: [], timeline: [] };
-
-        for (let s=1; s<=steps; s++){
-          // spočti aktuální kvocienty
-          const current = parties.map(p => ({
-            name: p.name,
-            q: p.votes / (p.mandates + 1),
-            divisor: p.mandates + 1,
-            color: p.color
-          }));
-          // vítěz
-          const winner = current.reduce((a,b)=> a.q>=b.q ? a : b);
-          // zapiš krok
-          timeline.push({
-            step: s,
-            rows: current
-              .sort((a,b)=> b.q - a.q)  // pro lepší čitelnost
-              .map(r => ({ ...r, win: r.name === winner.name }))
-          });
-          // přiděl mandát vítězi
-          const w = parties.find(p=>p.name===winner.name);
-          w.mandates += 1;
-        }
-        return { qualifying: parties.map(p=>({name:p.name, votes:p.votes, color:p.color})), timeline };
-      };
-
-      // --- UI ---
+      // --- vizualizační prvky (koláč, sloupce, pás) ---
       const Loader = () => (
         <div className="flex justify-center items-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-200 border-t-blue-500"></div>
@@ -180,9 +139,7 @@
                 <Legend layout="horizontal" verticalAlign="bottom" align="center" />
               </PieChart>
             </ResponsiveContainer>
-            <p className="text-sm text-gray-600 mt-2">
-              Celkem platných hlasů: <strong>{totalVotes}</strong>.
-            </p>
+            <p className="text-sm text-gray-600 mt-2">Celkem platných hlasů: <strong>{totalVotes}</strong>.</p>
           </div>
         );
       };
@@ -195,7 +152,7 @@
             Hlasy: p.votes,
             Mandáty: p.mandates,
             color,
-            light: mixWithWhite(color, 0.65) // světlejší pro „Mandáty“
+            light: mixWithWhite(color, 0.65)
           };
         });
         return (
@@ -224,29 +181,24 @@
         );
       };
 
-      // --- NOVÝ „pás“ 200 mandátů + legenda ---
       const MandateStrip = ({ data }) => {
         const ordered = data.filter(p=>p.mandates>0).sort((a,b)=> b.mandates - a.mandates || b.votes - a.votes);
         const tiles = ordered.flatMap(p => Array.from({length:p.mandates}).map(()=>({name:p.name, color:p.color})));
         const totalMandates = tiles.length;
-
-        if (!totalMandates) {
-          return <p className="text-center py-8 text-lg text-red-600">Žádná strana nepřekročila kvórum a nezískala mandáty.</p>;
-        }
+        if (!totalMandates) return <p className="text-center py-8 text-lg text-red-600">Žádná strana nepřekročila kvórum a nezískala mandáty.</p>;
 
         return (
           <div className="flex flex-col items-center">
             <h3 className="text-xl font-semibold mb-4">Rozdělení mandátů</h3>
-
             <div className="w-full overflow-x-auto">
-              <div className="flex flex-nowrap gap-1 p-3 bg-white rounded-lg shadow">
+              <div className="relative flex flex-nowrap gap-1 p-3 bg-white rounded-lg shadow">
+                {/* značka 101 */}
+                <div className="absolute left-[50.5%] top-2 bottom-2 w-0.5 bg-yellow-400 opacity-70 pointer-events-none"></div>
                 {tiles.map((t, i) => (
-                  <div key={i} className="w-4 h-4 rounded-md shadow-sm" title={`${t.name} – mandát ${i+1}`}
-                       style={{ backgroundColor: t.color }}></div>
+                  <div key={i} className="w-4 h-4 rounded-md shadow-sm" title={`${t.name} – mandát ${i+1}`} style={{ backgroundColor: t.color }}></div>
                 ))}
               </div>
             </div>
-
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 w-full">
               {ordered.map(p => (
                 <div key={p.name} className="flex items-center gap-2">
@@ -256,57 +208,39 @@
                 </div>
               ))}
             </div>
-
-            <p className="text-sm text-gray-600 mt-4">Celkem rozdělených mandátů: <strong>{totalMandates}</strong> z 200.</p>
-          </div>
-        );
-      };
-
-      const ResultsTable = ({ data, totalVotes, threshold }) => {
-        const mandatesSum = data.reduce((s,p)=>s+p.mandates,0);
-        return (
-          <div className="overflow-x-auto">
-            <h3 className="text-xl font-semibold mb-4 text-center">Tabulka kompletních výsledků</h3>
-            <div className="p-4 bg-white rounded-lg shadow-lg">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left  text-xs font-medium text-gray-500 uppercase tracking-wider">Strana</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Hlasy</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Podíl %</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">5% Klauzule</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Mandáty</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {data.map((p,i)=>(
-                    <tr key={i} className={p.qualified?'hover:bg-green-50':'hover:bg-red-50'}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{color:p.color}}>{p.name}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">{p.votes}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">{p.percent.toFixed(2)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${p.qualified?'bg-green-100 text-green-800':'bg-red-100 text-red-800'}`}>
-                          {p.qualified?'Postupuje':'Eliminována'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-right">{p.mandates}</td>
-                    </tr>
-                  ))}
-                  <tr>
-                    <td className="px-6 py-4 font-bold">CELKEM</td>
-                    <td className="px-6 py-4 font-bold text-right">{totalVotes}</td>
-                    <td className="px-6 py-4 font-bold text-right">100.00</td>
-                    <td className="px-6 py-4 font-bold text-right">Kvórum: {threshold.toFixed(2)}</td>
-                    <td className="px-6 py-4 font-bold text-right">{mandatesSum}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <p className="text-sm text-gray-600 mt-4">Celkem rozdělených mandátů: <strong>{totalMandates}</strong> z 200. Žlutá čára značí 101. křeslo.</p>
           </div>
         );
       };
 
       // --- MODAL s lepší vizualizací kroků ---
+      const dhondtStepsDetailed = (data, voteKey, steps, totalVotes) => {
+        const threshold = totalVotes * 0.05;
+        const parties = data
+          .filter(p => p[voteKey] >= threshold)
+          .map(p => ({ name: p.name, votes: p[voteKey], mandates: 0, color: PARTY_COLORS[p.name] || '#999' }));
+        const timeline = [];
+        if (!parties.length) return { qualifying: [], timeline: [] };
+
+        for (let s=1; s<=steps; s++){
+          const current = parties.map(p => ({
+            name: p.name,
+            q: p.votes / (p.mandates + 1),
+            divisor: p.mandates + 1,
+            color: p.color
+          }));
+          const winner = current.reduce((a,b)=> a.q>=b.q ? a : b);
+          timeline.push({
+            step: s,
+            rows: current
+              .sort((a,b)=> b.q - a.q)
+              .map(r => ({ ...r, win: r.name === winner.name }))
+          });
+          parties.find(p=>p.name===winner.name).mandates++;
+        }
+        return { qualifying: parties.map(p=>({name:p.name, votes:p.votes, color:p.color})), timeline };
+      };
+
       const ExplanationModal = ({ onClose, mode, totalVotes, threshold, data }) => {
         const voteKey = mode==='student' ? 'student' : 'total';
         const { qualifying, timeline } = dhondtStepsDetailed(data, voteKey, 10, totalVotes);
@@ -344,7 +278,6 @@
               </ol>
 
               <h3 className="text-xl font-bold mt-6 mb-3">Prvních 10 kroků – vizuální ukázka</h3>
-
               <div className="space-y-3">
                 {timeline.map(step => (
                   <div key={step.step} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
@@ -378,101 +311,72 @@
         );
       };
 
-      // --- APP ---
-      const App = () => {
-        const [mode, setMode] = useState('student');   // 'student' | 'total'
-        const [view, setView] = useState('pie');       // 'pie' | 'bar' | 'mandates' | 'table'
-        const [showExplanation, setShowExplanation] = useState(false);
+      // --- NOVÁ SEKCE: KOALIČNÍ STAVEBNICE ---
+      const CoalitionBuilder = ({ parties }) => {
+        const eligible = parties.filter(p=>p.mandates>0);
+        const [selected, setSelected] = useState(new Set());
 
-        const voteKey = mode==='student' ? 'student' : 'total';
-        const totalVotes = votesCast[voteKey];
-        const electorate = (voteKey==='student') ? totalElectorate.student : totalElectorate.total;
-
-        const results = useMemo(()=>calculateMandates(initialData, totalVotes, 200, voteKey), [mode, totalVotes]);
-        const turnout = electorate ? (votesCast[voteKey]/electorate)*100 : 0;
-        const threshold = totalVotes * 0.05;
-
-        const p4Votes = initialData.reduce((s,p)=>s+p.p4,0);
-
-        const getTurnoutInfo = () => mode==='student'
-          ? (<div className="text-sm">
-              <p>Hlasujících studentů: <strong>{votesCast.student}</strong> / {totalElectorate.student}</p>
-              <p className="font-semibold text-blue-600">Účast: {turnout.toFixed(2)} %</p>
-              <p className="mt-2 italic text-gray-700">Z toho <strong>{p4Votes}</strong> hlasů čtvrťáků v režimu „ze zahraničí“.</p>
-            </div>)
-          : (<div className="text-sm">
-              <p>Hlasujících celkem: <strong>{votesCast.total}</strong> / {totalElectorate.total}</p>
-              <p className="font-semibold text-blue-600">Účast: {turnout.toFixed(2)} %</p>
-            </div>);
-
-        const renderVisualization = () => {
-          if (!results.length) return <Loader />;
-          if (view==='pie')
-            return <div className="flex flex-col md:flex-row gap-8">
-              <div className="w-full md:w-1/2"><PieChartView data={results} totalVotes={totalVotes}/></div>
-              <div className="w-full md:w-1/2"><MandateStrip data={results}/></div>
-            </div>;
-          if (view==='bar') return <BarChartView data={results}/>;
-          if (view==='table') return <ResultsTable data={results} totalVotes={totalVotes} threshold={threshold}/>;
-          if (view==='mandates') return <MandateStrip data={results}/>;
-          return null;
+        const toggle = (name) => {
+          const s = new Set(selected);
+          s.has(name) ? s.delete(name) : s.add(name);
+          setSelected(s);
         };
 
+        const selectTop = (n) => {
+          const s = new Set(eligible.slice(0,n).map(p=>p.name));
+          setSelected(s);
+        };
+
+        const clearAll = () => setSelected(new Set());
+        const selectAll = () => setSelected(new Set(eligible.map(p=>p.name)));
+
+        const selectedList = eligible.filter(p=>selected.has(p.name));
+        const mandates = selectedList.reduce((sum,p)=>sum+p.mandates,0);
+        const majority = mandates >= 101;
+
+        // pás: vybrané strany po blocích v jejich barvách; zbytek šedý
+        const selectedTiles = selectedList
+          .sort((a,b)=> b.mandates - a.mandates || b.votes - a.votes)
+          .flatMap(p => Array.from({length:p.mandates}).map(()=>({name:p.name, color:p.color})));
+        const remaining = 200 - selectedTiles.length;
+
         return (
-          <div className="bg-white shadow-xl rounded-2xl p-4 md:p-8">
-            <h1 className="text-3xl md:text-4xl font-extrabold text-gray-800 mb-6 border-b pb-3">Školní Volební Analýza</h1>
-            <p className="text-lg text-gray-600 mb-6">Interaktivní vizualizace a přepočet mandátů podle pravidel pro Poslaneckou sněmovnu.</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              <div className="p-4 bg-gray-100 rounded-lg shadow-inner col-span-1 md:col-span-2">
-                <h2 className="text-xl font-bold mb-3">Režim hlasování</h2>
-                <div className="flex flex-wrap gap-3">
-                  <button onClick={()=>setMode('student')}
-                          className={`px-6 py-2 rounded-full font-semibold transition ${mode==='student'?'bg-blue-600 text-white hover:bg-blue-700':'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'}`}>
-                    Pouze studenti
-                  </button>
-                  <button onClick={()=>setMode('total')}
-                          className={`px-6 py-2 rounded-full font-semibold transition ${mode==='total'?'bg-blue-600 text-white hover:bg-blue-700':'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'}`}>
-                    Studenti + Učitelé
-                  </button>
-                </div>
+          <div className="space-y-4">
+            <div className={`p-4 rounded-lg ${majority ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+              <div className="flex items-baseline gap-3">
+                <span className="text-2xl font-extrabold">{mandates}</span>
+                <span className="text-gray-600">/ 200 mandátů</span>
+                <span className={`ml-auto px-2 py-1 rounded-full text-sm font-semibold ${majority?'bg-green-200 text-green-800':'bg-red-200 text-red-800'}`}>
+                  {majority ? 'Má většinu (≥ 101)' : 'Bez většiny (< 101)'}
+                </span>
               </div>
-              <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-lg shadow-inner">
-                <h2 className="text-xl font-bold mb-2">Volební účast</h2>
-                {getTurnoutInfo()}
-              </div>
+              <p className="text-sm text-gray-500 mt-1">Žlutá čára značí 101. křeslo.</p>
             </div>
 
-            <div className="mb-8 border-t pt-4">
-              <h2 className="text-xl font-bold mb-3">Zobrazení výsledků</h2>
-              <div className="flex flex-wrap gap-3">
-                <button onClick={()=>setView('pie')}      className={`px-4 py-2 rounded-lg font-medium transition ${view==='pie'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Koláčový graf</button>
-                <button onClick={()=>setView('bar')}      className={`px-4 py-2 rounded-lg font-medium transition ${view==='bar'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Sloupcový graf</button>
-                <button onClick={()=>setView('table')}    className={`px-4 py-2 rounded-lg font-medium transition ${view==='table'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Tabulka</button>
-                <button onClick={()=>setView('mandates')} className={`px-4 py-2 rounded-lg font-medium transition ${view==='mandates'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Pás mandátů</button>
-                <button onClick={()=>setShowExplanation(true)} className="px-4 py-2 rounded-lg font-medium transition bg-purple-500 text-white hover:bg-purple-600 shadow-md">Vysvětlení přepočtu</button>
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {eligible.map(p=>(
+                <button key={p.name}
+                  onClick={()=>toggle(p.name)}
+                  className={`px-3 py-1 rounded-full text-sm border shadow-sm transition ${selected.has(p.name) ? 'ring-2 ring-offset-2' : ''}`}
+                  style={{
+                    backgroundColor: mixWithWhite(p.color, selected.has(p.name) ? 0.75 : 0.9),
+                    borderColor: p.color, color:'#111'
+                  }}>
+                  <span className="mr-1" style={{color:p.color}}>●</span>{p.name} <span className="opacity-70">• {p.mandates}</span>
+                </button>
+              ))}
             </div>
 
-            <div className="min-h-[500px] border-t pt-8">
-              {renderVisualization()}
+            <div className="flex flex-wrap gap-2">
+              <button className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-50" onClick={clearAll}>Vyčistit</button>
+              <button className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-50" onClick={()=>selectTop(2)}>Top 2</button>
+              <button className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-50" onClick={()=>selectTop(3)}>Top 3</button>
+              <button className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-50" onClick={()=>selectTop(4)}>Top 4</button>
+              <button className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-50" onClick={selectAll}>Vybrat všechny</button>
             </div>
 
-            {showExplanation && (
-              <ExplanationModal
-                onClose={()=>setShowExplanation(false)}
-                mode={mode}
-                totalVotes={totalVotes}
-                threshold={threshold}
-                data={initialData}
-              />
-            )}
-          </div>
-        );
-      };
-
-      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-    });
-  </script>
-</body>
-</html>
+            <div className="w-full overflow-x-auto">
+              <div className="relative flex flex-nowrap gap-1 p-3 bg-white rounded-lg shadow">
+                <div className="absolute left-[50.5%] top-2 bottom-2 w-0.5 bg-yellow-400 opacity-70 pointer-events-none"></div>
+                {selectedTiles.map((t,i)=>(
+                  <div key={`sel-${i}`} className="w-4 h-4 rounded-md shadow-sm" title={`${t.name} – koaliční mandát ${i+1}`} style={{backgroundColor:t.color}}
