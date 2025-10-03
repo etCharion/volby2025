@@ -379,4 +379,114 @@
               <div className="relative flex flex-nowrap gap-1 p-3 bg-white rounded-lg shadow">
                 <div className="absolute left-[50.5%] top-2 bottom-2 w-0.5 bg-yellow-400 opacity-70 pointer-events-none"></div>
                 {selectedTiles.map((t,i)=>(
-                  <div key={`sel-${i}`} className="w-4 h-4 rounded-md shadow-sm" title={`${t.name} – koaliční mandát ${i+1}`} style={{backgroundColor:t.color}}
+                  <div key={`sel-${i}`} className="w-4 h-4 rounded-md shadow-sm" title={`${t.name} – koaliční mandát ${i+1}`} style={{backgroundColor:t.color}}></div>
+                ))}
+                {Array.from({length:remaining}).map((_,i)=>(
+                  <div key={`rem-${i}`} className="w-4 h-4 rounded-md shadow-inner" style={{background:'#E5E7EB'}} title="neobsazeno koalicí"></div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // --- APP ---
+      const App = () => {
+        const [mode, setMode] = useState('student');   // 'student' | 'total'
+        const [view, setView] = useState('pie');       // 'pie' | 'bar' | 'mandates' | 'table' | 'coalition'
+        const [showExplanation, setShowExplanation] = useState(false);
+
+        const voteKey = mode==='student' ? 'student' : 'total';
+        const totalVotes = votesCast[voteKey];
+        const electorate = (voteKey==='student') ? totalElectorate.student : totalElectorate.total;
+
+        const results = useMemo(()=>calculateMandates(initialData, totalVotes, 200, voteKey), [mode, totalVotes]);
+        const turnout = electorate ? (votesCast[voteKey]/electorate)*100 : 0;
+        const threshold = totalVotes * 0.05;
+
+        const p4Votes = initialData.reduce((s,p)=>s+p.p4,0);
+
+        const getTurnoutInfo = () => mode==='student'
+          ? (<div className="text-sm">
+              <p>Hlasujících studentů: <strong>{votesCast.student}</strong> / {totalElectorate.student}</p>
+              <p className="font-semibold text-blue-600">Účast: {turnout.toFixed(2)} %</p>
+              <p className="mt-2 italic text-gray-700">Z toho <strong>{p4Votes}</strong> hlasů čtvrťáků v režimu „ze zahraničí“.</p>
+            </div>)
+          : (<div className="text-sm">
+              <p>Hlasujících celkem: <strong>{votesCast.total}</strong> / {totalElectorate.total}</p>
+              <p className="font-semibold text-blue-600">Účast: {turnout.toFixed(2)} %</p>
+            </div>);
+
+        const renderVisualization = () => {
+          if (!results.length) return <Loader />;
+          if (view==='pie')
+            return <div className="flex flex-col md:flex-row gap-8">
+              <div className="w-full md:w-1/2"><PieChartView data={results} totalVotes={totalVotes}/></div>
+              <div className="w-full md:w-1/2"><MandateStrip data={results}/></div>
+            </div>;
+          if (view==='bar') return <BarChartView data={results}/>;
+          if (view==='table') return <ResultsTable data={results} totalVotes={totalVotes} threshold={threshold}/>;
+          if (view==='mandates') return <MandateStrip data={results}/>;
+          if (view==='coalition') return <CoalitionBuilder parties={results}/>;
+          return null;
+        };
+
+        return (
+          <div className="bg-white shadow-xl rounded-2xl p-4 md:p-8">
+            <h1 className="text-3xl md:text-4xl font-extrabold text-gray-800 mb-6 border-b pb-3">Školní Volební Analýza</h1>
+            <p className="text-lg text-gray-600 mb-6">Interaktivní vizualizace a přepočet mandátů podle pravidel pro Poslaneckou sněmovnu.</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <div className="p-4 bg-gray-100 rounded-lg shadow-inner col-span-1 md:col-span-2">
+                <h2 className="text-xl font-bold mb-3">Režim hlasování</h2>
+                <div className="flex flex-wrap gap-3">
+                  <button onClick={()=>setMode('student')}
+                          className={`px-6 py-2 rounded-full font-semibold transition ${mode==='student'?'bg-blue-600 text-white hover:bg-blue-700':'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'}`}>
+                    Pouze studenti
+                  </button>
+                  <button onClick={()=>setMode('total')}
+                          className={`px-6 py-2 rounded-full font-semibold transition ${mode==='total'?'bg-blue-600 text-white hover:bg-blue-700':'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'}`}>
+                    Studenti + Učitelé
+                  </button>
+                </div>
+              </div>
+              <div className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-lg shadow-inner">
+                <h2 className="text-xl font-bold mb-2">Volební účast</h2>
+                {getTurnoutInfo()}
+              </div>
+            </div>
+
+            <div className="mb-8 border-t pt-4">
+              <h2 className="text-xl font-bold mb-3">Zobrazení výsledků</h2>
+              <div className="flex flex-wrap gap-3">
+                <button onClick={()=>setView('pie')}       className={`px-4 py-2 rounded-lg font-medium transition ${view==='pie'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Koláčový graf</button>
+                <button onClick={()=>setView('bar')}       className={`px-4 py-2 rounded-lg font-medium transition ${view==='bar'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Sloupcový graf</button>
+                <button onClick={()=>setView('table')}     className={`px-4 py-2 rounded-lg font-medium transition ${view==='table'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Tabulka</button>
+                <button onClick={()=>setView('mandates')}  className={`px-4 py-2 rounded-lg font-medium transition ${view==='mandates'?'bg-green-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Pás mandátů</button>
+                <button onClick={()=>setView('coalition')} className={`px-4 py-2 rounded-lg font-medium transition ${view==='coalition'?'bg-purple-500 text-white shadow-lg':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Sestav koalici</button>
+                <button onClick={()=>setShowExplanation(true)} className="px-4 py-2 rounded-lg font-medium transition bg-blue-500 text-white hover:bg-blue-600 shadow-md">Vysvětlení přepočtu</button>
+              </div>
+            </div>
+
+            <div className="min-h-[500px] border-t pt-8">
+              {renderVisualization()}
+            </div>
+
+            {showExplanation && (
+              <ExplanationModal
+                onClose={()=>setShowExplanation(false)}
+                mode={mode}
+                totalVotes={totalVotes}
+                threshold={threshold}
+                data={initialData}
+              />
+            )}
+          </div>
+        );
+      };
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    });
+  </script>
+</body>
+</html>
